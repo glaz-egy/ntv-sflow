@@ -47,6 +47,21 @@ Requirements:
 - smooth updates without recreating the entire scene every tick
 - reduced-motion support
 
+### 3.1 Mercator projection mode
+
+The 3D globe stays the default. A flat Web Mercator map is an alternative
+projection of the same view (D-062), switched with the "3D Globe / Mercator"
+control at the top right of the visualization and kept in the URL as
+`proj=mercator`.
+
+- Same data, filters, selection, inspector and encoding (marker size, arc width,
+  colours, inbound/outbound arc heights, dash animation, selection ring).
+- Centred on the origin's meridian and wraps horizontally, so arcs always take
+  the short way and never cross the map edge.
+- Drag to pan, wheel to zoom. Latitudes are clamped at ±85.05°.
+- Arcs are curves between GeoIP points, not great circles or network paths.
+- Rendered with Canvas 2D; no extra dependency.
+
 ## 4. Origin
 
 The origin is a configured coarse location.

@@ -28,6 +28,7 @@ describe("parseContext / serializeContext", () => {
       top: 25,
       grouping: "ip",
       dir: "inbound",
+      proj: "mercator",
       mode: "hybrid",
       scope: "external",
       sel: "e:dev_nas01~dev_pc01",
@@ -58,9 +59,10 @@ describe("parseContext / serializeContext", () => {
   });
 
   it("falls back to defaults for invalid values instead of throwing", () => {
-    const ctx = parse("g=planet&dir=up&min=-5&top=abc&proto=sctp&mode=x&vlan=1.5&types=pc,toaster");
+    const ctx = parse("g=planet&dir=up&proj=robinson&min=-5&top=abc&proto=sctp&mode=x&vlan=1.5&types=pc,toaster");
     expect(ctx.grouping).toBe("asn");
     expect(ctx.dir).toBe("both");
+    expect(ctx.proj).toBe("globe");
     expect(ctx.min).toBe(0);
     expect(ctx.top).toBeNull();
     expect(ctx.proto).toBeNull();
@@ -128,6 +130,12 @@ describe("cross-view transitions", () => {
     expect(homeToGlobe(globeToHome(hist), "dev_pc01")).toMatchObject({ at: hist.at, span: 60 });
     const href = hrefFor("home", globeToHome(hist));
     expect(parseContext(new URLSearchParams(href.split("?")[1]))).toMatchObject({ at: hist.at, span: 60 });
+  });
+
+  it("view switches keep the Globe projection", () => {
+    const flat = { ...globe, proj: "mercator" as const };
+    const href = hrefFor("globe", homeToGlobe(globeToHome(flat), "dev_pc01"));
+    expect(parseContext(new URLSearchParams(href.split("?")[1])).proj).toBe("mercator");
   });
 
   it("round trip Globe → Home → Globe preserves context", () => {

@@ -8,9 +8,9 @@ import { feature } from "topojson-client";
 import type { Topology } from "topojson-specification";
 import countriesTopo from "world-atlas/countries-110m.json";
 import type { DirectionFilter, GlobeDestination, GlobeOrigin } from "@/contracts";
-import { formatMeasurement } from "@/lib/format/measurement";
 import { COLORS, withAlpha } from "@/lib/viz/colors";
 import { arcStroke, markerRadius, trafficOpacity } from "@/lib/viz/scales";
+import { angularDistance, arcLabel, destinationLabel, originLabel } from "./labels";
 
 const HEX_RESOLUTION = 3;
 
@@ -49,23 +49,6 @@ export interface GlobeCanvasProps {
   direction: DirectionFilter;
   animate: boolean;
   onSelect: (key: string | null) => void;
-}
-
-function angularDistance(aLat: number, aLng: number, bLat: number, bLng: number): number {
-  const r = Math.PI / 180;
-  const dLat = (bLat - aLat) * r;
-  const dLng = (bLng - aLng) * r;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(dLng / 2) ** 2;
-  return 2 * Math.asin(Math.min(1, Math.sqrt(h)));
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-}
-
-function tooltip(title: string, lines: string[]): string {
-  return `<div style="font:12px var(--font-geist-sans),sans-serif;background:rgba(15,23,42,.92);border:1px solid rgba(148,163,184,.25);border-radius:6px;padding:6px 8px;color:#e2e8f0">
-<div style="font-weight:600;margin-bottom:2px">${escapeHtml(title)}</div>${lines.map((l) => `<div>${escapeHtml(l)}</div>`).join("")}</div>`;
 }
 
 export default function GlobeCanvas(props: GlobeCanvasProps) {
@@ -194,7 +177,7 @@ export default function GlobeCanvas(props: GlobeCanvasProps) {
       color: COLORS.origin,
       altitude: 0.012,
       isOrigin: true,
-      label: tooltip(origin.label, [`Origin (${origin.precision} precision) — not an exact location`]),
+      label: originLabel(origin),
     });
     points.set("__origin__", originPoint);
 
@@ -213,11 +196,7 @@ export default function GlobeCanvas(props: GlobeCanvasProps) {
         color: selected ? COLORS.selected : withAlpha(base, dim ? 0.25 : trafficOpacity(total)),
         altitude: selected ? 0.02 : 0.01,
         isOrigin: false,
-        label: tooltip(d.label, [
-          `↓ in ${formatMeasurement(d.inbound_bps)}  ↑ out ${formatMeasurement(d.outbound_bps)}`,
-          `${d.source_device_count} internal source${d.source_device_count === 1 ? "" : "s"}`,
-          loc.basis === "geoip" ? "Approximate GeoIP location" : `Marker: ${loc.basis.replace("_", " ")}`,
-        ]),
+        label: destinationLabel(d),
       });
       points.set(d.key, p);
       seenPoints.add(d.key);
@@ -246,10 +225,7 @@ export default function GlobeCanvas(props: GlobeCanvasProps) {
           dashLength: animate ? 0.4 : 1,
           dashGap: animate ? 0.2 : 0,
           animateMs: animate ? 3000 : 0,
-          label: tooltip(`${dir === "outbound" ? "↑ Outbound to" : "↓ Inbound from"} ${d.label}`, [
-            formatMeasurement(m),
-            "Arc = GeoIP relation, not the network path",
-          ]),
+          label: arcLabel(d, dir, m),
         });
         arcs.set(id, a);
         seenArcs.add(id);

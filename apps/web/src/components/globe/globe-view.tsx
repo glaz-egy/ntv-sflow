@@ -1,17 +1,18 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { X } from "lucide-react";
+import { Globe2, Map as MapIcon, X } from "lucide-react";
 import type { DirectionFilter, Grouping, Protocol } from "@/contracts";
 import { Rate } from "@/components/common/rate";
 import { MIN_BPS_OPTIONS, OptionGroup, PROTOCOL_OPTIONS, SelectField } from "@/components/common/fields";
 import { FilterSection, SummaryItem, Workspace } from "@/components/shell/workspace";
 import { Button } from "@/components/ui/button";
 import { useLiveQuery } from "@/lib/data/data-context";
-import { withGrouping } from "@/lib/state/context";
+import { withGrouping, type GlobeProjection } from "@/lib/state/context";
 import { useHistoryWindow } from "@/lib/state/use-history-window";
 import { useInvestigation, useReducedMotionPreference } from "@/lib/state/use-investigation";
 import { useUiStore } from "@/lib/state/ui-store";
+import { cn } from "@/lib/utils";
 import { COLORS } from "@/lib/viz/colors";
 import { DestinationInspector } from "./destination-inspector";
 
@@ -19,6 +20,16 @@ const GlobeCanvas = dynamic(() => import("./globe-canvas"), {
   ssr: false,
   loading: () => <div className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">Loading globe…</div>,
 });
+
+const MercatorCanvas = dynamic(() => import("./mercator-canvas"), {
+  ssr: false,
+  loading: () => <div className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">Loading map…</div>,
+});
+
+const PROJECTION_OPTIONS: Array<{ value: GlobeProjection; label: string; icon: typeof Globe2 }> = [
+  { value: "globe", label: "3D Globe", icon: Globe2 },
+  { value: "mercator", label: "Mercator", icon: MapIcon },
+];
 
 const GROUPING_OPTIONS: Array<{ value: Grouping; label: string }> = [
   { value: "country", label: "Country" },
@@ -59,6 +70,7 @@ export function GlobeView() {
   }
   const sourceLabel = sourceOptions.find((o) => o.value === ctx.src)?.label ?? ctx.src;
 
+  const Canvas = ctx.proj === "mercator" ? MercatorCanvas : GlobeCanvas;
   const destinations = data?.destinations ?? [];
   const unlocated = destinations.filter((d) => d.location === null);
 
@@ -171,7 +183,8 @@ export function GlobeView() {
     >
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,oklch(0.2_0.04_255)_0%,transparent_70%)]" />
       {data && (
-        <GlobeCanvas
+        <Canvas
+          key={ctx.proj}
           origin={data.origin}
           destinations={destinations}
           selectedKey={ctx.dst}
@@ -181,7 +194,29 @@ export function GlobeView() {
         />
       )}
 
-      <div className="pointer-events-none absolute inset-x-3 top-3 flex flex-wrap items-start gap-2">
+      <div
+        role="radiogroup"
+        aria-label="Projection"
+        className="absolute top-3 right-3 z-10 flex rounded-md border border-border/60 bg-background/80 p-0.5 backdrop-blur"
+      >
+        {PROJECTION_OPTIONS.map(({ value, label, icon: Icon }) => (
+          <button
+            key={value}
+            role="radio"
+            aria-checked={ctx.proj === value}
+            onClick={() => update({ proj: value })}
+            className={cn(
+              "flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground",
+              ctx.proj === value && "bg-accent text-foreground",
+            )}
+          >
+            <Icon className="size-3.5" />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="pointer-events-none absolute top-3 right-52 left-3 flex flex-wrap items-start gap-2">
         {ctx.src && (
           <span className="pointer-events-auto flex items-center gap-1 rounded-full border border-border/60 bg-background/80 py-0.5 pr-1 pl-2.5 text-xs backdrop-blur">
             Source: <strong className="font-medium">{sourceLabel}</strong>

@@ -9,6 +9,7 @@
  *   dst   destination key (Globe: selected destination, Home: destination filter)
  *   proto protocol filter            min  minimum bps         top  top N
  *   g     Globe grouping             dir  Globe direction
+ *   proj  Globe projection (3D globe or flat Mercator map)
  *   mode  Home view mode             scope Home internal/external scope
  *   sel   Home inspector selection   vlan Home VLAN filter    types Home device types
  *   inactive  Home: also show devices without traffic in the window
@@ -26,6 +27,7 @@ import type {
 
 export type ViewName = "globe" | "home";
 export type HomeMode = "traffic" | "topology" | "hybrid";
+export type GlobeProjection = "globe" | "mercator";
 
 export interface InvestigationContext {
   src: string | null;
@@ -35,6 +37,7 @@ export interface InvestigationContext {
   top: number | null;
   grouping: Grouping;
   dir: DirectionFilter;
+  proj: GlobeProjection;
   mode: HomeMode;
   scope: ScopeFilter;
   sel: string | null;
@@ -59,6 +62,7 @@ export const DEFAULT_CONTEXT: InvestigationContext = {
   top: null,
   grouping: "asn",
   dir: "both",
+  proj: "globe",
   mode: "traffic",
   scope: "both",
   sel: null,
@@ -72,6 +76,7 @@ export const DEFAULT_CONTEXT: InvestigationContext = {
 const GROUPINGS: Grouping[] = ["country", "city", "asn", "ip"];
 const DIRECTIONS: DirectionFilter[] = ["inbound", "outbound", "both"];
 const PROTOCOLS: Protocol[] = ["tcp", "udp", "icmp", "other"];
+const PROJECTIONS: GlobeProjection[] = ["globe", "mercator"];
 const MODES: HomeMode[] = ["traffic", "topology", "hybrid"];
 const SCOPES: ScopeFilter[] = ["internal", "external", "both"];
 const DEVICE_TYPES: DeviceType[] = [
@@ -139,6 +144,7 @@ export function parseContext(params: ParamSource): InvestigationContext {
     // A selected destination implies its grouping, so the selection stays visible.
     grouping: dstGrouping ?? oneOf(params.get("g"), GROUPINGS, DEFAULT_CONTEXT.grouping),
     dir: oneOf(params.get("dir"), DIRECTIONS, DEFAULT_CONTEXT.dir),
+    proj: oneOf(params.get("proj"), PROJECTIONS, DEFAULT_CONTEXT.proj),
     mode: oneOf(params.get("mode"), MODES, DEFAULT_CONTEXT.mode),
     scope: oneOf(params.get("scope"), SCOPES, DEFAULT_CONTEXT.scope),
     sel: nonEmpty(params.get("sel")),
@@ -159,6 +165,7 @@ export function serializeContext(ctx: InvestigationContext): URLSearchParams {
   if (ctx.top !== null) p.set("top", String(ctx.top));
   if (ctx.grouping !== DEFAULT_CONTEXT.grouping) p.set("g", ctx.grouping);
   if (ctx.dir !== DEFAULT_CONTEXT.dir) p.set("dir", ctx.dir);
+  if (ctx.proj !== DEFAULT_CONTEXT.proj) p.set("proj", ctx.proj);
   if (ctx.mode !== DEFAULT_CONTEXT.mode) p.set("mode", ctx.mode);
   if (ctx.scope !== DEFAULT_CONTEXT.scope) p.set("scope", ctx.scope);
   if (ctx.sel) p.set("sel", ctx.sel);

@@ -382,3 +382,11 @@ What is stored is the pre-attribution input of a live window: one row per second
 Status: Accepted
 
 Inventory, exporters, topology and settings stay in the validated YAML inventory (D-055). Nothing edits them at runtime yet: there is no configuration UI and no discovery. A database copy would add a second source of truth without a user. PostgreSQL arrives with the first writer (configuration API, discovery or multi-user). `postgres.dsn` stays reserved.
+
+## D-062 — Mercator projection mode for Globe View
+Status: Accepted
+
+Globe View can also be drawn as a flat Web Mercator map. The 3D globe stays the default and the main experience (CLAUDE.md rule 1). The map is an alternative projection of the same view, not a separate view: same query, filters, selection, inspector and visual encoding.
+- **State.** The projection is investigation context in the URL (`proj`, default `globe`), so it is shareable and survives Globe ↔ Home switches (D-002).
+- **Rendering.** Canvas 2D in `mercator-canvas.tsx` with the same props as `globe-canvas.tsx`. Mercator math is in `lib/viz/mercator.ts`, with tests. The map is centred on the origin's meridian and repeats horizontally, so each destination is placed within half a world of the origin and no arc crosses the map edge. Rings crossing the antimeridian are unwrapped.
+- **Semantics.** Arcs are curves bowed northwards with different bends for inbound and outbound. They are not great circles and not paths (rule 6). Mercator distorts area at high latitudes. Marker size encodes traffic, not area, so this distortion does not affect the data shown.

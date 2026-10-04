@@ -1,0 +1,81 @@
+# Next.js web UI (image built from Dockerfile). NEXT_PUBLIC_* are baked in at
+# image build time: build with NEXT_PUBLIC_DATA_MODE=api and
+# NEXT_PUBLIC_API_BASE_URL=<the URL in ingress.yaml> (docs/KUBERNETES.ja.md §2).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ntv-web
+  labels:
+    app.kubernetes.io/name: ntv-web
+    app.kubernetes.io/component: web
+spec:
+  replicas: 1 # stateless: may be scaled out
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ntv-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ntv-web
+        app.kubernetes.io/component: web
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100 # "app" in the image
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: ntv-web
+          ports:
+            - name: http
+              containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /globe
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /globe
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # Writable paths for the read-only root filesystem.
+            - name: next-cache
+              mountPath: /app/apps/web/.next/cache
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: next-cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ntv-web
+  labels:
+    app.kubernetes.io/name: ntv-web
+spec:
+  selector:
+    app.kubernetes.io/name: ntv-web
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http

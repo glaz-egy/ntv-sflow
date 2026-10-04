@@ -1,0 +1,594 @@
+openapi: 3.0.3
+info:
+  title: Network Traffic Visualizer API
+  version: 0.1.0
+  description: |
+    Source of truth for the frontend/API contract (docs/DECISIONS.md D-021).
+    TypeScript types are generated from this file (`pnpm gen:api`) and Go
+    handlers are validated against it in tests.
+
+    Rates are always `Measurement` objects (D-023). Sampled estimates are
+    statistical estimates, never exact throughput.
+servers:
+  - url: /api/v1
+
+paths:
+  /status:
+    get:
+      operationId: getStatus
+      responses:
+        "200":
+          description: Data mode, collector state and freshness.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+
+  /globe:
+    get:
+      operationId: getGlobe
+      parameters:
+        - { name: grouping, in: query, required: true, schema: { $ref: "#/components/schemas/Grouping" } }
+        - { name: source_node_id, in: query, schema: { type: string } }
+        - { name: direction, in: query, schema: { $ref: "#/components/schemas/DirectionFilter" } }
+        - { name: protocol, in: query, schema: { $ref: "#/components/schemas/Protocol" } }
+        - { name: min_bps, in: query, schema: { type: number, minimum: 0 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000 } }
+      responses:
+        "200":
+          description: External destinations for the current window.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GlobeResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /globe/destinations/{key}:
+    get:
+      operationId: getGlobeDestination
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: Destination key `<grouping>:<value>` (URL-encoded).
+          schema: { type: string }
+        - { name: source_node_id, in: query, schema: { type: string } }
+        - { name: protocol, in: query, schema: { $ref: "#/components/schemas/Protocol" } }
+      responses:
+        "200":
+          description: Destination inspector data.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GlobeDestinationDetail" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /home/traffic:
+    get:
+      operationId: getHomeTraffic
+      parameters:
+        - { name: focus_node_id, in: query, schema: { type: string } }
+        - { name: destination_key, in: query, schema: { type: string } }
+        - { name: vlan_id, in: query, schema: { type: integer, minimum: 0 } }
+        - name: device_types
+          in: query
+          description: Comma-separated device types.
+          schema: { type: string }
+        - { name: protocol, in: query, schema: { $ref: "#/components/schemas/Protocol" } }
+        - { name: min_bps, in: query, schema: { type: number, minimum: 0 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 2000 } }
+        - { name: include_inactive, in: query, schema: { type: boolean } }
+        - { name: scope, in: query, schema: { $ref: "#/components/schemas/ScopeFilter" } }
+      responses:
+        "200":
+          description: Device nodes and logical traffic edges for the current window.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HomeTrafficResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /home/topology:
+    get:
+      operationId: getHomeTopology
+      responses:
+        "200":
+          description: Known topology with evidence per link.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TopologyResponse" }
+
+  /devices:
+    get:
+      operationId: listDevices
+      parameters:
+        - { name: type, in: query, schema: { $ref: "#/components/schemas/DeviceType" } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/DeviceStatus" } }
+        - { name: vlan, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: search, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Known devices.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceListResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /devices/{id}:
+    get:
+      operationId: getDevice
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: grouping, in: query, schema: { $ref: "#/components/schemas/Grouping" } }
+      responses:
+        "200":
+          description: Device inspector data.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceDetail" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /flows:
+    get:
+      operationId: searchFlows
+      description: |
+        Investigation endpoint (not the visualization transport). MVP searches
+        the current aggregate window only; history arrives with persistence.
+      parameters:
+        - { name: source, in: query, schema: { type: string } }
+        - { name: destination, in: query, schema: { type: string } }
+        - { name: source_node_id, in: query, schema: { type: string } }
+        - { name: destination_node_id, in: query, schema: { type: string } }
+        - { name: protocol, in: query, schema: { $ref: "#/components/schemas/Protocol" } }
+        - { name: src_port, in: query, schema: { type: integer, minimum: 0, maximum: 65535 } }
+        - { name: dst_port, in: query, schema: { type: integer, minimum: 0, maximum: 65535 } }
+        - { name: exporter, in: query, schema: { type: string } }
+        - { name: internal_scope, in: query, schema: { $ref: "#/components/schemas/FlowScope" } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000 } }
+      responses:
+        "200":
+          description: Matching attributed flows.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FlowSearchResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /ws:
+    get:
+      operationId: websocket
+      description: |
+        WebSocket upgrade. Client sends `SubscribeMessage`; server sends
+        `ServerEnvelope` events (`window_update` once per aggregate window,
+        `heartbeat`, `error`). Raw samples are never forwarded (D-031).
+      responses:
+        "101":
+          description: Switching protocols.
+
+components:
+  responses:
+    BadRequest:
+      description: Invalid parameter.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+    NotFound:
+      description: Not found in the current window.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+
+  schemas:
+    # ------------------------------------------------------------- common
+    Timestamp:
+      type: string
+      format: date-time
+      description: RFC3339 UTC.
+    MeasurementKind:
+      type: string
+      enum: [counter, sampled_estimate]
+    Measurement:
+      type: object
+      required: [value, unit, measurement_kind]
+      properties:
+        value: { type: number }
+        unit: { type: string, enum: [bps, pps] }
+        measurement_kind: { $ref: "#/components/schemas/MeasurementKind" }
+        window_seconds: { type: integer, description: Aggregation window of a sampled estimate. }
+        interval_seconds: { type: integer, description: Counter polling interval of a counter value. }
+        sample_count: { type: integer, description: Packet samples behind a sampled estimate. }
+    TimeWindow:
+      type: object
+      required: [start, end]
+      properties:
+        start: { $ref: "#/components/schemas/Timestamp" }
+        end: { $ref: "#/components/schemas/Timestamp" }
+    AddressFamily:
+      type: string
+      enum: [ipv4, ipv6]
+    Direction:
+      type: string
+      enum: [inbound, outbound]
+    DirectionFilter:
+      type: string
+      enum: [inbound, outbound, both]
+    Protocol:
+      type: string
+      enum: [tcp, udp, icmp, other]
+    ProtocolShare:
+      type: object
+      required: [protocol, port, service, bps]
+      properties:
+        protocol: { $ref: "#/components/schemas/Protocol" }
+        port: { type: integer, nullable: true }
+        service: { type: string, nullable: true }
+        bps: { $ref: "#/components/schemas/Measurement" }
+    ObservationPoint:
+      type: object
+      required: [exporter_id, exporter_name, input_if_index, output_if_index, used_for_aggregate, sampling_rate]
+      properties:
+        exporter_id: { type: string }
+        exporter_name: { type: string }
+        input_if_index: { type: integer, nullable: true }
+        output_if_index: { type: integer, nullable: true }
+        used_for_aggregate:
+          type: boolean
+          description: True for the observation point whose values were used (others are not summed, D-024).
+        sampling_rate: { type: integer }
+    ApiError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+
+    # ------------------------------------------------------------- status
+    DataMode:
+      type: string
+      enum: [mock, live]
+    CollectorState:
+      type: string
+      enum: [connected, stale, disconnected, not_applicable]
+    MockInfo:
+      type: object
+      required: [seed, scenario, speed]
+      properties:
+        seed: { type: integer }
+        scenario: { type: string }
+        speed: { type: number }
+    StatusResponse:
+      type: object
+      required: [mode, live, collector, last_aggregate_at, server_time, update_interval_seconds, window_seconds, mock]
+      properties:
+        mode: { $ref: "#/components/schemas/DataMode" }
+        live: { type: boolean, description: False when no new windows are being produced. }
+        collector:
+          type: object
+          required: [status, last_datagram_at]
+          properties:
+            status: { $ref: "#/components/schemas/CollectorState" }
+            last_datagram_at: { type: string, format: date-time, nullable: true }
+        last_aggregate_at: { type: string, format: date-time, nullable: true }
+        server_time: { $ref: "#/components/schemas/Timestamp" }
+        update_interval_seconds: { type: number }
+        window_seconds: { type: number }
+        mock:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/MockInfo" }]
+
+    # -------------------------------------------------------------- globe
+    Grouping:
+      type: string
+      enum: [country, city, asn, ip]
+    GlobeOrigin:
+      type: object
+      required: [label, latitude, longitude, precision]
+      properties:
+        label: { type: string }
+        latitude: { type: number }
+        longitude: { type: number }
+        precision: { type: string, enum: [country, region, city, custom] }
+    LocationBasis:
+      type: string
+      enum: [geoip, city, country_anchor, country_dominant, asn_dominant]
+      description: Why a marker sits where it does (D-022).
+    GeoLocation:
+      type: object
+      required: [latitude, longitude, basis]
+      properties:
+        latitude: { type: number }
+        longitude: { type: number }
+        basis: { $ref: "#/components/schemas/LocationBasis" }
+    GlobeDestination:
+      type: object
+      required:
+        [key, grouping, label, ip, country_code, country_name, city, location, asn, organization,
+         inbound_bps, outbound_bps, source_device_count, source_node_ids, last_seen]
+      properties:
+        key: { type: string, description: "`<grouping>:<value>`, parse by first colon." }
+        grouping: { $ref: "#/components/schemas/Grouping" }
+        label: { type: string }
+        ip: { type: string, nullable: true }
+        country_code: { type: string, nullable: true }
+        country_name: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        location:
+          nullable: true
+          description: null = unknown; never substituted with a placeholder.
+          allOf: [{ $ref: "#/components/schemas/GeoLocation" }]
+        asn: { type: integer, nullable: true }
+        organization: { type: string, nullable: true }
+        inbound_bps: { $ref: "#/components/schemas/Measurement" }
+        outbound_bps: { $ref: "#/components/schemas/Measurement" }
+        source_device_count: { type: integer }
+        source_node_ids: { type: array, items: { type: string } }
+        last_seen: { $ref: "#/components/schemas/Timestamp" }
+    WanSummary:
+      type: object
+      required: [download, upload, basis]
+      properties:
+        download: { $ref: "#/components/schemas/Measurement" }
+        upload: { $ref: "#/components/schemas/Measurement" }
+        basis: { type: string, enum: [boundary_counter, sampled_sum] }
+    GlobeResponse:
+      type: object
+      required: [window, server_time, origin, grouping, destinations, truncated_count, summary]
+      properties:
+        window: { $ref: "#/components/schemas/TimeWindow" }
+        server_time: { $ref: "#/components/schemas/Timestamp" }
+        origin: { $ref: "#/components/schemas/GlobeOrigin" }
+        grouping: { $ref: "#/components/schemas/Grouping" }
+        destinations: { type: array, items: { $ref: "#/components/schemas/GlobeDestination" } }
+        truncated_count: { type: integer }
+        summary: { $ref: "#/components/schemas/WanSummary" }
+    DestinationSource:
+      type: object
+      required: [node_id, label, device_type, resolved, inbound_bps, outbound_bps]
+      properties:
+        node_id: { type: string }
+        label: { type: string }
+        device_type: { $ref: "#/components/schemas/DeviceType" }
+        resolved: { type: boolean }
+        inbound_bps: { $ref: "#/components/schemas/Measurement" }
+        outbound_bps: { $ref: "#/components/schemas/Measurement" }
+    DestinationMember:
+      type: object
+      required: [ip, city, country_code, total_bps]
+      properties:
+        ip: { type: string }
+        city: { type: string, nullable: true }
+        country_code: { type: string, nullable: true }
+        total_bps: { $ref: "#/components/schemas/Measurement" }
+    GlobeDestinationDetail:
+      type: object
+      required: [destination, top_sources, top_protocols, members, observation_points]
+      properties:
+        destination: { $ref: "#/components/schemas/GlobeDestination" }
+        top_sources: { type: array, items: { $ref: "#/components/schemas/DestinationSource" } }
+        top_protocols: { type: array, items: { $ref: "#/components/schemas/ProtocolShare" } }
+        members: { type: array, items: { $ref: "#/components/schemas/DestinationMember" } }
+        observation_points: { type: array, items: { $ref: "#/components/schemas/ObservationPoint" } }
+
+    # --------------------------------------------------------------- home
+    DeviceType:
+      type: string
+      enum: [internet, router, firewall, switch, wireless_ap, server, pc, smartphone, iot, vm, kubernetes_node, unknown]
+    DeviceStatus:
+      type: string
+      enum: [online, stale, offline, unknown]
+    HomeNodeKind:
+      type: string
+      enum: [device, unresolved_endpoint, internet, external_destination]
+    HomeNode:
+      type: object
+      required: [id, kind, label, device_type, status, addresses, vlan_id, network_name, rx_bps, tx_bps, last_seen]
+      properties:
+        id: { type: string, description: "Device id, `ep:<ip>`, `internet` or `dst:<key>` (D-027)." }
+        kind: { $ref: "#/components/schemas/HomeNodeKind" }
+        label: { type: string }
+        device_type: { $ref: "#/components/schemas/DeviceType" }
+        status: { $ref: "#/components/schemas/DeviceStatus" }
+        addresses: { type: array, items: { type: string } }
+        vlan_id: { type: integer, nullable: true }
+        network_name: { type: string, nullable: true }
+        rx_bps:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Measurement" }]
+        tx_bps:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Measurement" }]
+        last_seen: { type: string, format: date-time, nullable: true }
+    TrafficScope:
+      type: string
+      enum: [internal, external]
+    ScopeFilter:
+      type: string
+      enum: [internal, external, both]
+    TrafficEdge:
+      type: object
+      description: Logical communication between two endpoints, not a physical path (D-032).
+      required: [id, source, target, scope, forward_bps, reverse_bps, top_protocols, observation_points, last_seen]
+      properties:
+        id: { type: string }
+        source: { type: string }
+        target: { type: string }
+        scope: { $ref: "#/components/schemas/TrafficScope" }
+        forward_bps: { $ref: "#/components/schemas/Measurement" }
+        reverse_bps: { $ref: "#/components/schemas/Measurement" }
+        top_protocols: { type: array, items: { $ref: "#/components/schemas/ProtocolShare" } }
+        observation_points: { type: array, items: { $ref: "#/components/schemas/ObservationPoint" } }
+        last_seen: { $ref: "#/components/schemas/Timestamp" }
+    HomeSummary:
+      type: object
+      required: [wan_total, internal_estimated, device_count, online_count]
+      properties:
+        wan_total: { $ref: "#/components/schemas/Measurement" }
+        internal_estimated: { $ref: "#/components/schemas/Measurement" }
+        device_count: { type: integer }
+        online_count: { type: integer }
+    DestinationContext:
+      type: object
+      required: [key, label, source_node_ids]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        source_node_ids: { type: array, items: { type: string } }
+    HomeTrafficResponse:
+      type: object
+      required: [window, server_time, nodes, edges, truncated_count, destination_context, summary]
+      properties:
+        window: { $ref: "#/components/schemas/TimeWindow" }
+        server_time: { $ref: "#/components/schemas/Timestamp" }
+        nodes: { type: array, items: { $ref: "#/components/schemas/HomeNode" } }
+        edges: { type: array, items: { $ref: "#/components/schemas/TrafficEdge" } }
+        truncated_count: { type: integer }
+        destination_context:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/DestinationContext" }]
+        summary: { $ref: "#/components/schemas/HomeSummary" }
+    TopologyLinkType:
+      type: string
+      enum: [physical, wireless_association, logical, unknown]
+    TopologyEvidence:
+      type: string
+      enum: [manual, lldp, cdp, wlc, inferred]
+    TopologyLink:
+      type: object
+      required: [id, source_node_id, target_node_id, link_type, evidence, confidence, source_interface, target_interface]
+      properties:
+        id: { type: string }
+        source_node_id: { type: string }
+        target_node_id: { type: string }
+        link_type: { $ref: "#/components/schemas/TopologyLinkType" }
+        evidence: { $ref: "#/components/schemas/TopologyEvidence" }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        source_interface: { type: string, nullable: true }
+        target_interface: { type: string, nullable: true }
+    TopologyResponse:
+      type: object
+      required: [nodes, links, generated_at]
+      properties:
+        nodes: { type: array, items: { $ref: "#/components/schemas/HomeNode" } }
+        links: { type: array, items: { $ref: "#/components/schemas/TopologyLink" } }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+
+    # ------------------------------------------------------------ devices
+    DeviceAddress:
+      type: object
+      required: [address, family, source]
+      properties:
+        address: { type: string }
+        family: { $ref: "#/components/schemas/AddressFamily" }
+        source: { type: string, enum: [static, dhcp, arp, nd, dns, wlc, flow, manual] }
+    DevicePeer:
+      type: object
+      required: [node_id, label, device_type, tx_bps, rx_bps]
+      properties:
+        node_id: { type: string }
+        label: { type: string }
+        device_type: { $ref: "#/components/schemas/DeviceType" }
+        tx_bps: { $ref: "#/components/schemas/Measurement" }
+        rx_bps: { $ref: "#/components/schemas/Measurement" }
+    DeviceExternalDestination:
+      type: object
+      required: [key, label, country_code, outbound_bps, inbound_bps]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        country_code: { type: string, nullable: true }
+        outbound_bps: { $ref: "#/components/schemas/Measurement" }
+        inbound_bps: { $ref: "#/components/schemas/Measurement" }
+    DeviceAttachment:
+      type: object
+      required: [via_node_id, via_label, interface, evidence]
+      properties:
+        via_node_id: { type: string }
+        via_label: { type: string }
+        interface: { type: string, nullable: true }
+        evidence: { $ref: "#/components/schemas/TopologyEvidence" }
+    DeviceDetail:
+      type: object
+      required: [node, addresses, macs, ssid, attachment, vendor, model, top_internal_peers, top_external_destinations]
+      properties:
+        node: { $ref: "#/components/schemas/HomeNode" }
+        addresses: { type: array, items: { $ref: "#/components/schemas/DeviceAddress" } }
+        macs: { type: array, items: { type: string } }
+        ssid: { type: string, nullable: true }
+        attachment:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/DeviceAttachment" }]
+        vendor: { type: string, nullable: true }
+        model: { type: string, nullable: true }
+        top_internal_peers: { type: array, items: { $ref: "#/components/schemas/DevicePeer" } }
+        top_external_destinations: { type: array, items: { $ref: "#/components/schemas/DeviceExternalDestination" } }
+    DeviceListResponse:
+      type: object
+      required: [devices]
+      properties:
+        devices: { type: array, items: { $ref: "#/components/schemas/HomeNode" } }
+
+    # -------------------------------------------------------------- flows
+    FlowScope:
+      type: string
+      enum: [internal, external, transit]
+    FlowRecord:
+      type: object
+      required:
+        [src_ip, dst_ip, protocol, src_port, dst_port, scope, direction, src_node_id, dst_node_id,
+         bps, exporter_id, sampling_rate, last_seen]
+      properties:
+        src_ip: { type: string }
+        dst_ip: { type: string }
+        protocol: { $ref: "#/components/schemas/Protocol" }
+        src_port: { type: integer, nullable: true }
+        dst_port: { type: integer, nullable: true }
+        scope: { $ref: "#/components/schemas/FlowScope" }
+        direction:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Direction" }]
+        src_node_id: { type: string, nullable: true }
+        dst_node_id: { type: string, nullable: true }
+        bps: { $ref: "#/components/schemas/Measurement" }
+        exporter_id: { type: string, description: Observation point used for the value. }
+        sampling_rate: { type: integer }
+        last_seen: { type: string, format: date-time, nullable: true }
+    FlowSearchResponse:
+      type: object
+      required: [window, flows, truncated_count]
+      properties:
+        window: { $ref: "#/components/schemas/TimeWindow" }
+        flows: { type: array, items: { $ref: "#/components/schemas/FlowRecord" } }
+        truncated_count: { type: integer }
+
+    # ----------------------------------------------------------- realtime
+    SubscribeMessage:
+      type: object
+      required: [type, channels]
+      properties:
+        type: { type: string, enum: [subscribe] }
+        channels:
+          type: array
+          items: { type: string, enum: [globe, home, status] }
+        filters:
+          type: object
+          properties:
+            source_node_id: { type: string, nullable: true }
+            min_bps: { type: number }
+    ServerEventType:
+      type: string
+      enum: [window_update, globe_update, home_update, device_update, collector_status, heartbeat, error]
+    ServerEnvelope:
+      type: object
+      required: [type, sequence, server_time, payload]
+      properties:
+        type: { $ref: "#/components/schemas/ServerEventType" }
+        sequence: { type: integer }
+        server_time: { $ref: "#/components/schemas/Timestamp" }
+        payload: {}
+    WindowUpdatePayload:
+      type: object
+      required: [window_end, status]
+      properties:
+        window_end: { $ref: "#/components/schemas/Timestamp" }
+        status: { $ref: "#/components/schemas/StatusResponse" }

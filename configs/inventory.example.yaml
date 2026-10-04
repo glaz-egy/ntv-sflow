@@ -1,0 +1,46 @@
+# Inventory template for a real network. Everything is optional: with an
+# empty inventory, live mode still works — internal endpoints show up as
+# "Unresolved device" (temporary ep:<ip> identities) and exporters are
+# identified by agent address.
+#
+# Point app config at it with `inventory_file:` or INVENTORY_FILE.
+
+# sFlow agents (observation points). agent_address/sub_agent_id must match the
+# datagram's agent address, not necessarily the UDP source.
+exporters:
+  - id: exp_edge
+    name: edge-router
+    agent_address: 192.0.2.1
+    role: boundary            # boundary | core | access
+    boundary_if_index: 1      # WAN interface: its counters drive Download/Upload
+    if_speed_bps: 1000000000
+  # - { id: exp_core, name: core-switch, agent_address: 192.0.2.2, role: core }
+
+# Which exporter's observation counts when several see the same flow (D-024).
+observation_policy:
+  external: [boundary, core, access]
+  internal: [core, access, boundary]
+
+# Address plan, used for VLAN/network labels.
+networks:
+  - { name: lan, cidr: 192.168.1.0/24, vlan_id: 1 }
+
+# Devices. ids are permanent identities: never IP addresses (D-009).
+devices:
+  - id: dev_router
+    name: edge-router
+    type: router              # router firewall switch wireless_ap server pc smartphone iot vm kubernetes_node unknown
+    addresses: [192.168.1.1]
+  # - id: dev_nas
+  #   name: nas
+  #   type: server
+  #   addresses: [{ address: 192.168.1.10, source: static }, "fd00::10"]
+  #   macs: ["aa:bb:cc:dd:ee:ff"]
+  #   vlan_id: 1
+
+# Known links only — never inferred from flows. "internet" is the external node.
+topology:
+  - { a: internet, b: dev_router, link_type: logical, evidence: manual, confidence: 1 }
+
+# Optional static GeoIP/ASN for prefixes you know better than the GeoIP database.
+geo_overrides: []

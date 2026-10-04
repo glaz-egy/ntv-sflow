@@ -1,0 +1,87 @@
+app:
+  mode: mock # mock | live (live: sFlow collector runs inside the API process)
+  update_interval: 1s
+  aggregation_window: 5s
+
+# Devices, exporters, topology and GeoIP overrides (optional; see
+# configs/inventory.example.yaml, or configs/inventory.demo.yaml with sflow-gen).
+inventory_file: ""
+
+live:
+  stale_after: 15s # no sFlow for this long → data shown as stale
+
+api:
+  listen: ":8080"
+  # Browser origins allowed to call the API (the Next.js dev server by default).
+  cors_allowed_origins:
+    - "http://localhost:3000"
+
+# Used when app.mode = mock (Go API serves the same deterministic data as the
+# in-browser mock; see docs/DECISIONS.md D-025).
+mock:
+  seed: 42
+  scenario: default # default | heavy-download | internal-backup | many-destinations | unknown-metadata | stale-collector
+  speed: 1
+
+collector:
+  listen: "0.0.0.0:6343"
+  protocol: "sflow-v5"
+  workers: 2
+  queue_size: 4096
+  read_buffer_bytes: 0 # 0 = OS default; raise for bursty exporters
+  # Accept datagrams only from these sources (addresses or CIDRs). Empty = all.
+  # Prefer firewalling UDP/6343 to known exporters as well (docs/SECURITY.md).
+  allowed_sources: []
+  metrics_listen: ":9102" # Prometheus /metrics and /healthz; "" disables
+  summary_interval: 10s
+  # > 0 prints normalized flow samples as JSON lines (bounded). Sensitive.
+  debug_flows_per_second: 0
+
+network:
+  internal_cidrs:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+    - "fc00::/7"
+
+  # Optional coarse origin for Globe visualization.
+  # Do not require exact address-level coordinates.
+  origin:
+    label: "Home Network"
+    latitude: 35.68
+    longitude: 139.76
+    precision: "city"
+
+visualization:
+  globe:
+    default_grouping: "asn"
+    max_arcs: 100
+    min_bps: 1000000
+    particles: true
+
+  home:
+    max_nodes: 300
+    max_edges: 250
+    min_bps: 1000000
+    default_mode: "traffic"
+
+# Optional MaxMind GeoLite2/GeoIP2 databases (not included). Missing files are
+# tolerated: destinations are then shown under "Unknown location".
+geoip:
+  city_db_path: "./data/GeoLite2-City.mmdb"
+  asn_db_path: "./data/GeoLite2-ASN.mmdb"
+
+postgres:
+  dsn: "postgres://ntv:ntv@localhost:5432/ntv?sslmode=disable"
+
+clickhouse:
+  dsn: "clickhouse://localhost:9000/ntv"
+
+redis:
+  enabled: false
+  address: "localhost:6379"
+
+history:
+  raw_flow_retention: "7d"
+  aggregate_1m_retention: "90d"
+  aggregate_1h_retention: "365d"

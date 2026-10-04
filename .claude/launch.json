@@ -1,0 +1,60 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "web",
+        "dev",
+        "--port",
+        "3000"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "go",
+      "runtimeArgs": [
+        "run",
+        "./cmd/api",
+        "-config",
+        "configs/config.example.yaml"
+      ],
+      "port": 8080
+    },
+    {
+      "name": "web-api",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "web",
+        "dev",
+        "--port",
+        "3000"
+      ],
+      "port": 3000,
+      "env": {
+        "NEXT_PUBLIC_DATA_MODE": "api",
+        "NEXT_PUBLIC_API_BASE_URL": "http://localhost:8080"
+      }
+    },
+    {
+      "name": "web-live",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "web",
+        "dev",
+        "--port",
+        "3010"
+      ],
+      "port": 3010,
+      "env": {
+        "NEXT_PUBLIC_DATA_MODE": "api",
+        "NEXT_PUBLIC_API_BASE_URL": "http://localhost:18080"
+      }
+    }
+  ]
+}

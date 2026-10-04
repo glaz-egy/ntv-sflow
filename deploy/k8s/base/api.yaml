@@ -1,0 +1,85 @@
+# Go REST + WebSocket API (image built from Dockerfile.backend).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ntv-api
+  labels:
+    app.kubernetes.io/name: ntv-api
+    app.kubernetes.io/component: api
+spec:
+  # Keep a single replica: live windows and WebSocket clients are held in
+  # process memory (D-053), so replicas would show different data.
+  replicas: 1
+  # Recreate: the old pod releases UDP/6343 and RWO volumes before the new one starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ntv-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ntv-api
+        app.kubernetes.io/component: api
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100 # "app" in the image
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ntv-go
+          command: ["ntv-api"]
+          env:
+            - name: APP_CONFIG
+              value: /etc/ntv/k8s/config.yaml
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/ntv/k8s
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: ntv-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ntv-api
+  labels:
+    app.kubernetes.io/name: ntv-api
+spec:
+  selector:
+    app.kubernetes.io/name: ntv-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

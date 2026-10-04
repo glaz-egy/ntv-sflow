@@ -1,0 +1,35 @@
+# One host for UI and API: the browser calls /api/v1/* (REST + WebSocket) on
+# the same origin, so CORS and the WebSocket origin check see the same host.
+# /healthz and /metrics are not routed: they stay inside the cluster.
+#
+# There is no authentication yet (D-019): expose only on a trusted network
+# (docs/SECURITY.md §3).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ntv
+spec:
+  # Omit to use the cluster's default IngressClass.
+  # ingressClassName: traefik
+  rules:
+    - host: ntv.home.arpa
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: ntv-api
+                port:
+                  name: http
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ntv-web
+                port:
+                  name: http
+  # TLS (then use https:// in config.yaml and NEXT_PUBLIC_API_BASE_URL):
+  # tls:
+  #   - hosts: [ntv.home.arpa]
+  #     secretName: ntv-tls

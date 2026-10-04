@@ -1,0 +1,27 @@
+# sFlow v5 ingress for exporters outside the cluster.
+# LoadBalancer needs a provider (cloud LB, MetalLB, k3s ServiceLB, ...).
+# Do not expose UDP/6343 to the internet (docs/SECURITY.md §2).
+apiVersion: v1
+kind: Service
+metadata:
+  name: ntv-sflow
+  labels:
+    app.kubernetes.io/name: ntv-api
+  # Fixed address, e.g. MetalLB:
+  # annotations:
+  #   metallb.io/loadBalancerIPs: 192.168.1.240
+spec:
+  type: LoadBalancer
+  # Keep the exporter's UDP source address (no SNAT) so that
+  # collector.allowed_sources works. Exporter identity itself comes from the
+  # sFlow agent address in the payload (D-049), not from the UDP source.
+  externalTrafficPolicy: Local
+  # Restrict who may reach the LB, where the provider supports it:
+  # loadBalancerSourceRanges: ["192.168.1.0/24"]
+  selector:
+    app.kubernetes.io/name: ntv-api
+  ports:
+    - name: sflow
+      protocol: UDP
+      port: 6343
+      targetPort: sflow

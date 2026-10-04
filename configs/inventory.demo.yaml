@@ -1,0 +1,79 @@
+# Demo inventory: the same home lab as the mock (internal/mock/inventory.go).
+# Use with `sflow-gen` to run LIVE mode end to end without hardware:
+#   APP_MODE=live INVENTORY_FILE=configs/inventory.demo.yaml pnpm dev:api
+#   pnpm sflow-gen -target 127.0.0.1:6343
+# Addresses are documentation/private ranges; geo_overrides replace GeoIP
+# for the demo destinations (org labels are illustrative only).
+
+exporters:
+  - { id: exp_router, name: home-router, agent_address: 10.0.0.1, role: boundary, boundary_if_index: 1, if_speed_bps: 10000000000 }
+  - { id: exp_core, name: core-switch, agent_address: 10.0.0.2, role: core, if_speed_bps: 10000000000 }
+
+observation_policy:
+  external: [boundary, core, access]
+  internal: [core, access, boundary]
+
+networks:
+  - { name: mgmt, cidr: 10.0.0.0/24, vlan_id: 1 }
+  - { name: servers, cidr: 10.10.0.0/24, vlan_id: 10 }
+  - { name: clients, cidr: 10.20.0.0/24, vlan_id: 20 }
+  - { name: iot, cidr: 10.30.0.0/24, vlan_id: 30 }
+  - { name: wireless, cidr: 10.40.0.0/24, vlan_id: 40 }
+  - { name: servers-v6, cidr: "fd00:10::/64", vlan_id: 10 }
+  - { name: clients-v6, cidr: "fd00:20::/64", vlan_id: 20 }
+  - { name: wireless-v6, cidr: "fd00:40::/64", vlan_id: 40 }
+
+devices:
+  - { id: dev_router, name: home-router, type: router, addresses: [10.0.0.1], vlan_id: 1, vendor: Mock Networks, model: MR-1000, macs: ["02:00:00:00:00:01"] }
+  - { id: dev_core_sw, name: core-switch, type: switch, addresses: [10.0.0.2], vlan_id: 1, vendor: Mock Networks, model: MS-24, macs: ["02:00:00:00:00:02"] }
+  - { id: dev_access_sw, name: access-switch-01, type: switch, addresses: [10.0.0.3], vlan_id: 1, macs: ["02:00:00:00:00:03"] }
+  - { id: dev_ap_main, name: ap-main, type: wireless_ap, addresses: [10.0.0.4], vlan_id: 1, macs: ["02:00:00:00:00:04"] }
+  - { id: dev_nas01, name: nas-01, type: server, addresses: [10.10.0.10, "fd00:10::10"], vlan_id: 10, vendor: Mock Storage, macs: ["02:00:00:00:10:10"] }
+  - { id: dev_k8s01, name: k8s-node-01, type: kubernetes_node, addresses: [10.10.0.20], vlan_id: 10, macs: ["02:00:00:00:10:20"] }
+  - { id: dev_media, name: media-server, type: server, addresses: [10.10.0.30], vlan_id: 10, macs: ["02:00:00:00:10:30"] }
+  - id: dev_pc01
+    name: pc-01
+    type: pc
+    addresses: [{ address: 10.20.0.10, source: dhcp }, { address: "fd00:20::10", source: nd }]
+    vlan_id: 20
+    macs: ["02:00:00:00:20:10"]
+  - { id: dev_laptop01, name: laptop-01, type: pc, addresses: [{ address: 10.40.0.21, source: dhcp }], vlan_id: 40, ssid: home-5g, macs: ["02:00:00:00:40:21"] }
+  - id: dev_phone01
+    name: phone-01
+    type: smartphone
+    addresses: [{ address: 10.40.0.22, source: dhcp }, { address: "fd00:40::22", source: nd }]
+    vlan_id: 40
+    ssid: home-5g
+  - { id: dev_tablet01, name: tablet-01, type: smartphone, addresses: [{ address: 10.40.0.23, source: dhcp }], vlan_id: 40, ssid: home-5g }
+  - { id: dev_thermostat, name: iot-thermostat, type: iot, addresses: [{ address: 10.30.0.40, source: dhcp }], vlan_id: 30, ssid: home-iot }
+  - { id: dev_camera, name: iot-camera, type: iot, addresses: [{ address: 10.30.0.41, source: dhcp }], vlan_id: 30 }
+
+topology:
+  - { a: internet, b: dev_router, link_type: logical, evidence: manual, confidence: 1, b_interface: wan0 }
+  - { a: dev_router, b: dev_core_sw, link_type: physical, evidence: manual, confidence: 1, a_interface: lan0, b_interface: Gi1/0/1 }
+  - { a: dev_core_sw, b: dev_nas01, link_type: physical, evidence: lldp, confidence: 0.95, a_interface: Gi1/0/3, b_interface: eth0 }
+  - { a: dev_core_sw, b: dev_k8s01, link_type: physical, evidence: lldp, confidence: 0.95, a_interface: Gi1/0/4, b_interface: eno1 }
+  - { a: dev_core_sw, b: dev_media, link_type: physical, evidence: inferred, confidence: 0.5, a_interface: Gi1/0/5 }
+  - { a: dev_core_sw, b: dev_access_sw, link_type: physical, evidence: lldp, confidence: 0.95, a_interface: Gi1/0/6, b_interface: Gi0/1 }
+  - { a: dev_core_sw, b: dev_ap_main, link_type: physical, evidence: lldp, confidence: 0.95, a_interface: Gi1/0/7, b_interface: eth0 }
+  - { a: dev_access_sw, b: dev_pc01, link_type: physical, evidence: manual, confidence: 1, a_interface: Gi0/2 }
+  - { a: dev_access_sw, b: dev_camera, link_type: physical, evidence: inferred, confidence: 0.6, a_interface: Gi0/5 }
+  - { a: dev_ap_main, b: dev_laptop01, link_type: wireless_association, evidence: wlc, confidence: 0.9, a_interface: radio1 }
+  - { a: dev_ap_main, b: dev_phone01, link_type: wireless_association, evidence: wlc, confidence: 0.9, a_interface: radio1 }
+  - { a: dev_ap_main, b: dev_tablet01, link_type: wireless_association, evidence: wlc, confidence: 0.9, a_interface: radio1 }
+  - { a: dev_ap_main, b: dev_thermostat, link_type: wireless_association, evidence: wlc, confidence: 0.9, a_interface: radio0 }
+
+geo_overrides:
+  - { prefix: 198.51.100.10/32, country_code: JP, country_name: Japan, city: Tokyo, latitude: 35.68, longitude: 139.69, asn: 13335, organization: Cloudflare }
+  - { prefix: 198.51.100.11/32, country_code: US, country_name: United States, city: San Jose, latitude: 37.34, longitude: -121.89, asn: 13335, organization: Cloudflare }
+  - { prefix: "2001:db8:1::10/128", country_code: DE, country_name: Germany, city: Frankfurt, latitude: 50.11, longitude: 8.68, asn: 13335, organization: Cloudflare }
+  - { prefix: 203.0.113.20/32, country_code: JP, country_name: Japan, city: Tokyo, latitude: 35.68, longitude: 139.69, asn: 15169, organization: Google }
+  - { prefix: 203.0.113.21/32, country_code: US, country_name: United States, city: Council Bluffs, latitude: 41.26, longitude: -95.86, asn: 15169, organization: Google }
+  - { prefix: 192.0.2.30/32, country_code: US, country_name: United States, city: Ashburn, latitude: 39.04, longitude: -77.49, asn: 16509, organization: Amazon }
+  - { prefix: 192.0.2.31/32, country_code: SG, country_name: Singapore, city: Singapore, latitude: 1.35, longitude: 103.82, asn: 16509, organization: Amazon }
+  - { prefix: 203.0.113.40/32, country_code: JP, country_name: Japan, city: Osaka, latitude: 34.69, longitude: 135.5, asn: 8075, organization: Microsoft }
+  - { prefix: 203.0.113.41/32, country_code: NL, country_name: Netherlands, city: Amsterdam, latitude: 52.37, longitude: 4.9, asn: 8075, organization: Microsoft }
+  - { prefix: 198.51.100.50/32, country_code: JP, country_name: Japan, city: Tokyo, latitude: 35.68, longitude: 139.69, asn: 20940, organization: Akamai }
+  - { prefix: 203.0.113.80/32, country_code: JP, country_name: Japan, city: Tokyo, latitude: 35.68, longitude: 139.69, asn: 2906, organization: Netflix }
+  - { prefix: 203.0.113.60/32, country_code: JP, country_name: Japan, city: Tokyo, latitude: 35.68, longitude: 139.69, asn: 32590, organization: Valve }
+  - { prefix: 198.51.100.200/32, asn: 64500, organization: Example Transit (mock) }

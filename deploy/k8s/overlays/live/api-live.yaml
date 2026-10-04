@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ntv-api
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          env:
+            - name: APP_MODE
+              value: live
+            - name: INVENTORY_FILE
+              value: /etc/ntv/inventory/inventory.yaml
+          ports:
+            - name: sflow
+              containerPort: 6343
+              protocol: UDP
+          volumeMounts:
+            - name: inventory
+              mountPath: /etc/ntv/inventory
+              readOnly: true
+      volumes:
+        - name: inventory
+          configMap:
+            name: ntv-inventory

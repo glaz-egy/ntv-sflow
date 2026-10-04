@@ -1,0 +1,24 @@
+{
+  "name": "network-traffic-visualizer",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "dev:api": "go run ./cmd/api -config configs/config.example.yaml",
+    "build": "pnpm --filter web build",
+    "lint": "pnpm --filter web lint && go vet ./... && test -z \"$(gofmt -l cmd internal)\"",
+    "typecheck": "pnpm --filter web typecheck",
+    "test": "pnpm --filter web test && go test ./...",
+    "test:web": "pnpm --filter web test",
+    "test:go": "go test ./...",
+    "gen:api": "pnpm --filter web gen:api",
+    "update:golden": "UPDATE_GOLDEN=1 pnpm --filter web exec vitest run src/lib/mock-backend/golden.test.ts && go test ./internal/mock/",
+    "format": "pnpm --filter web format && gofmt -w cmd internal",
+    "dev:collector": "go run ./cmd/collector -config configs/config.example.yaml",
+    "sflow-gen": "go run ./cmd/sflow-gen",
+    "fuzz": "go test ./internal/sflow/ -run ^$ -fuzz=FuzzDecode -fuzztime=60s && go test ./internal/packet/ -run ^$ -fuzz=FuzzParseEthernet -fuzztime=60s",
+    "build:go": "go build -o bin/api ./cmd/api && go build -o bin/collector ./cmd/collector && go build -o bin/sflow-gen ./cmd/sflow-gen",
+    "dev:live": "APP_MODE=live go run ./cmd/api -config configs/config.example.yaml",
+    "dev:live-demo": "APP_MODE=live INVENTORY_FILE=configs/inventory.demo.yaml go run ./cmd/api -config configs/config.example.yaml"
+  }
+}

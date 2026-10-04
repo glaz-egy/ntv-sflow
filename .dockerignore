@@ -1,0 +1,12 @@
+**/node_modules
+**/.next
+**/*.tsbuildinfo
+.git
+.claude
+.env
+.env.*
+!.env.example
+data
+*.pcap
+*.pcapng
+bin

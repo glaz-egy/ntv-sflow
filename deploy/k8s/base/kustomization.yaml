@@ -1,0 +1,31 @@
+# Network Traffic Visualizer on Kubernetes — base (Go API in mock mode + web UI).
+#   kubectl apply -k deploy/k8s/base
+# Live sFlow ingestion: deploy/k8s/overlays/live. Guide: docs/KUBERNETES.ja.md
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ntv
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: network-traffic-visualizer
+    includeSelectors: false
+
+resources:
+  - namespace.yaml
+  - api.yaml
+  - web.yaml
+  - ingress.yaml
+
+configMapGenerator:
+  - name: ntv-config
+    files:
+      - config.yaml
+
+# Replace with your registry/tag, e.g.
+#   cd deploy/k8s/base && kustomize edit set image ntv-go=registry.example.com/ntv-go:0.1.0
+images:
+  - name: ntv-go
+    newTag: dev
+  - name: ntv-web
+    newTag: dev

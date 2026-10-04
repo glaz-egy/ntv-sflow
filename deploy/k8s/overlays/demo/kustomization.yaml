@@ -1,0 +1,22 @@
+# Live mode without sFlow hardware: sflow-gen sends sFlow generated from the
+# mock to the in-cluster collector, using the demo inventory baked into the image.
+#   kubectl apply -k deploy/k8s/overlays/demo
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../live
+  - sflow-gen.yaml
+
+patches:
+  - path: api-demo.yaml
+  # In-cluster traffic only: no LoadBalancer needed.
+  - target:
+      kind: Service
+      name: ntv-sflow
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: ClusterIP
+      - op: remove
+        path: /spec/externalTrafficPolicy

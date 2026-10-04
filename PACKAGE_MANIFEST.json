@@ -1,0 +1,36 @@
+{
+  "name": "network-traffic-visualizer-claude-package",
+  "version": "1.0",
+  "working_title": "Network Traffic Visualizer",
+  "purpose": "Claude Code development package for a two-mode sFlow traffic visualization web application",
+  "primary_views": [
+    "Globe View",
+    "Home Network View"
+  ],
+  "files": [
+    ".env.example",
+    ".gitignore",
+    "CLAUDE.md",
+    "README.md",
+    "apps/web/.gitkeep",
+    "cmd/api/.gitkeep",
+    "cmd/collector/.gitkeep",
+    "configs/config.example.yaml",
+    "deploy/docker-compose.dev.yml",
+    "docs/API.md",
+    "docs/ARCHITECTURE.md",
+    "docs/CLAUDE_START_PROMPT.md",
+    "docs/DATA_MODEL.md",
+    "docs/DECISIONS.md",
+    "docs/DEVELOPMENT.md",
+    "docs/GLOBE_VIEW.md",
+    "docs/HOME_NETWORK_VIEW.md",
+    "docs/MOCK_DATA.md",
+    "docs/OBSERVABILITY.md",
+    "docs/PRODUCT_SPEC.md",
+    "docs/SECURITY.md",
+    "docs/SFLOW.md",
+    "docs/TASKS.md",
+    "internal/.gitkeep"
+  ]
+}

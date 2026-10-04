@@ -1,0 +1,22 @@
+# Live mode: the API embeds the sFlow v5 collector (D-053).
+#   kubectl apply -k deploy/k8s/overlays/live
+# Edit inventory.yaml for your network first. Exporters send to the external
+# IP of Service ntv-sflow (UDP/6343).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - sflow-service.yaml
+
+# Uncomment to mount MaxMind GeoLite2 databases from a PVC (docs/KUBERNETES.ja.md §7).
+# components:
+#   - ../../components/geoip
+
+configMapGenerator:
+  - name: ntv-inventory
+    files:
+      - inventory.yaml
+
+patches:
+  - path: api-live.yaml

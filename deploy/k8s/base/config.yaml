@@ -1,0 +1,56 @@
+# Go API configuration for Kubernetes (mounted at /etc/ntv/k8s/config.yaml).
+# Keys omitted here use the defaults in internal/config; environment variables
+# set by the overlays (APP_MODE, INVENTORY_FILE, ...) override this file.
+# Unknown keys are errors (D-044).
+app:
+  mode: mock # the live overlay sets APP_MODE=live
+  update_interval: 1s
+  aggregation_window: 5s
+
+live:
+  stale_after: 15s
+
+api:
+  listen: ":8080"
+  # Must contain the URL the browser opens (scheme://host[:port]). It is also
+  # the WebSocket origin allow-list (D-041). Change together with ingress.yaml
+  # and the web image's NEXT_PUBLIC_API_BASE_URL.
+  cors_allowed_origins:
+    - "http://ntv.home.arpa"
+
+mock:
+  seed: 42
+  scenario: default # default | heavy-download | internal-backup | many-destinations | unknown-metadata | stale-collector
+  speed: 1
+
+collector:
+  listen: "0.0.0.0:6343"
+  protocol: "sflow-v5"
+  workers: 2
+  queue_size: 4096
+  read_buffer_bytes: 0
+  # Exporter UDP source addresses/CIDRs (empty = all). Needs the source IP to
+  # survive the Service: see externalTrafficPolicy in overlays/live.
+  allowed_sources: []
+  summary_interval: 10s
+  debug_flows_per_second: 0 # sensitive; keep 0
+
+network:
+  # Your internal networks (not limited to RFC1918). Include pod/service
+  # CIDRs only if they should count as "internal".
+  internal_cidrs:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+    - "fc00::/7"
+  # Coarse origin only (docs/SECURITY.md §4).
+  origin:
+    label: "Home Network"
+    latitude: 35.68
+    longitude: 139.76
+    precision: "city"
+
+# Optional; mounted by components/geoip. Missing files → "Unknown location".
+geoip:
+  city_db_path: "/data/geoip/GeoLite2-City.mmdb"
+  asn_db_path: "/data/geoip/GeoLite2-ASN.mmdb"

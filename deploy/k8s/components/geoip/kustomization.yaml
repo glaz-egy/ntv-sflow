@@ -1,0 +1,11 @@
+# Mounts MaxMind GeoLite2/GeoIP2 databases (not included) at /data/geoip.
+# The files are too large for a ConfigMap; copy them into the PVC once
+# (docs/KUBERNETES.ja.md §7). Paths are set in base/config.yaml (geoip.*).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - pvc.yaml
+
+patches:
+  - path: api-geoip.yaml

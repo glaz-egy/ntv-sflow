@@ -1,0 +1,29 @@
+# Environment
+.env
+.env.local
+
+# Node
+node_modules/
+.next/
+out/
+
+# Go
+bin/
+coverage.out
+
+# Data / secrets
+data/*.mmdb
+*.pcap
+*.pcapng
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Local database state
+.tmp/
+*.tsbuildinfo
+
+# Docker compose env overrides
+docker.env

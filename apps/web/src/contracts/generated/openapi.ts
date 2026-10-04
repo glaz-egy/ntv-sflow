@@ -124,10 +124,32 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * @description Investigation endpoint (not the visualization transport). MVP searches
-     *     the current aggregate window only; history arrives with persistence.
+     * @description Investigation endpoint (not the visualization transport). Searches
+     *     the current aggregate window, or [start, end) from history (D-059).
+     *     Results are ordered by estimated bytes; `next_cursor` continues.
      */
     get: operations["searchFlows"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/history/timeline": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * @description Traffic over time for the timeline (D-059): sampled estimates per
+     *     scope, de-duplicated across observation points, plus boundary counter
+     *     rates where available. Buckets without stored data have has_data=false.
+     */
+    get: operations["getHistoryTimeline"];
     put?: never;
     post?: never;
     delete?: never;
@@ -237,6 +259,42 @@ export interface components {
       update_interval_seconds: number;
       window_seconds: number;
       mock: components["schemas"]["MockInfo"] | null;
+      /** @description Null when history is disabled (or with the in-browser mock). */
+      history: components["schemas"]["HistoryStatus"] | null;
+    };
+    HistoryTier: {
+      /** @description Stored resolution. */
+      step_seconds: number;
+      /** @description How long this resolution is kept. */
+      retention_seconds: number;
+    };
+    HistoryStatus: {
+      /** @enum {string} */
+      backend: "memory" | "clickhouse";
+      /** Format: date-time */
+      earliest: string | null;
+      /** Format: date-time */
+      latest: string | null;
+      tiers: components["schemas"]["HistoryTier"][];
+    };
+    HistoryTimelinePoint: {
+      start: components["schemas"]["Timestamp"];
+      has_data: boolean;
+      /** @description External → internal (download), sampled estimate. */
+      inbound: components["schemas"]["Measurement"] | null;
+      /** @description Internal → external (upload), sampled estimate. */
+      outbound: components["schemas"]["Measurement"] | null;
+      /** @description Internal ↔ internal, sampled estimate. */
+      internal: components["schemas"]["Measurement"] | null;
+      /** @description Boundary counter rate. */
+      wan_download: components["schemas"]["Measurement"] | null;
+      /** @description Boundary counter rate. */
+      wan_upload: components["schemas"]["Measurement"] | null;
+    };
+    HistoryTimelineResponse: {
+      window: components["schemas"]["TimeWindow"];
+      step_seconds: number;
+      points: components["schemas"]["HistoryTimelinePoint"][];
     };
     /** @enum {string} */
     Grouping: "country" | "city" | "asn" | "ip";
@@ -462,7 +520,10 @@ export interface components {
     FlowSearchResponse: {
       window: components["schemas"]["TimeWindow"];
       flows: components["schemas"]["FlowRecord"][];
+      /** @description Matches after this page. */
       truncated_count: number;
+      /** @description Pass as `cursor` for the next page; null on the last page. */
+      next_cursor: string | null;
     };
     SubscribeMessage: {
       /** @enum {string} */
@@ -494,6 +555,24 @@ export interface components {
     };
   };
   responses: {
+    /** @description History is not enabled on this server. */
+    HistoryUnavailable: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["ApiError"];
+      };
+    };
+    /** @description The history store could not be queried. */
+    HistoryError: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["ApiError"];
+      };
+    };
     /** @description Invalid parameter. */
     BadRequest: {
       headers: {
@@ -513,7 +592,12 @@ export interface components {
       };
     };
   };
-  parameters: never;
+  parameters: {
+    /** @description Start of a historical window (RFC3339, inclusive). Requires `end`; omit both for the live window. */
+    Start: components["schemas"]["Timestamp"];
+    /** @description End of a historical window (RFC3339, exclusive). The range is aligned outwards to the stored resolution. */
+    End: components["schemas"]["Timestamp"];
+  };
   requestBodies: never;
   headers: never;
   pathItems: never;
@@ -549,6 +633,10 @@ export interface operations {
         protocol?: components["schemas"]["Protocol"];
         min_bps?: number;
         limit?: number;
+        /** @description Start of a historical window (RFC3339, inclusive). Requires `end`; omit both for the live window. */
+        start?: components["parameters"]["Start"];
+        /** @description End of a historical window (RFC3339, exclusive). The range is aligned outwards to the stored resolution. */
+        end?: components["parameters"]["End"];
       };
       header?: never;
       path?: never;
@@ -556,7 +644,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description External destinations for the current window. */
+      /** @description External destinations for the current (or requested historical) window. */
       200: {
         headers: {
           [name: string]: unknown;
@@ -566,6 +654,8 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      501: components["responses"]["HistoryUnavailable"];
+      503: components["responses"]["HistoryError"];
     };
   };
   getGlobeDestination: {
@@ -573,6 +663,10 @@ export interface operations {
       query?: {
         source_node_id?: string;
         protocol?: components["schemas"]["Protocol"];
+        /** @description Start of a historical window (RFC3339, inclusive). Requires `end`; omit both for the live window. */
+        start?: components["parameters"]["Start"];
+        /** @description End of a historical window (RFC3339, exclusive). The range is aligned outwards to the stored resolution. */
+        end?: components["parameters"]["End"];
       };
       header?: never;
       path: {
@@ -594,6 +688,8 @@ export interface operations {
       };
       400: components["responses"]["BadRequest"];
       404: components["responses"]["NotFound"];
+      501: components["responses"]["HistoryUnavailable"];
+      503: components["responses"]["HistoryError"];
     };
   };
   getHomeTraffic: {
@@ -609,6 +705,10 @@ export interface operations {
         limit?: number;
         include_inactive?: boolean;
         scope?: components["schemas"]["ScopeFilter"];
+        /** @description Start of a historical window (RFC3339, inclusive). Requires `end`; omit both for the live window. */
+        start?: components["parameters"]["Start"];
+        /** @description End of a historical window (RFC3339, exclusive). The range is aligned outwards to the stored resolution. */
+        end?: components["parameters"]["End"];
       };
       header?: never;
       path?: never;
@@ -616,7 +716,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Device nodes and logical traffic edges for the current window. */
+      /** @description Device nodes and logical traffic edges for the current (or requested historical) window. */
       200: {
         headers: {
           [name: string]: unknown;
@@ -626,11 +726,18 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      501: components["responses"]["HistoryUnavailable"];
+      503: components["responses"]["HistoryError"];
     };
   };
   getHomeTopology: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Start of a historical window (RFC3339, inclusive). Requires `end`; omit both for the live window. */
+        start?: components["parameters"]["Start"];
+        /** @description End of a historical window (RFC3339, exclusive). The range is aligned outwards to the stored resolution. */
+        end?: components["parameters"]["End"];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -646,6 +753,9 @@ export interface operations {
           "application/json": components["schemas"]["TopologyResponse"];
         };
       };
+      400: components["responses"]["BadRequest"];
+      501: components["responses"]["HistoryUnavailable"];
+      503: components["responses"]["HistoryError"];
     };
   };
   listDevices: {
@@ -655,6 +765,10 @@ export interface operations {
         status?: components["schemas"]["DeviceStatus"];
         vlan?: number;
         search?: string;
+        /** @description Start of a historical window (RFC3339, inclusive). Requires `end`; omit both for the live window. */
+        start?: components["parameters"]["Start"];
+        /** @description End of a historical window (RFC3339, exclusive). The range is aligned outwards to the stored resolution. */
+        end?: components["parameters"]["End"];
       };
       header?: never;
       path?: never;
@@ -672,12 +786,18 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      501: components["responses"]["HistoryUnavailable"];
+      503: components["responses"]["HistoryError"];
     };
   };
   getDevice: {
     parameters: {
       query?: {
         grouping?: components["schemas"]["Grouping"];
+        /** @description Start of a historical window (RFC3339, inclusive). Requires `end`; omit both for the live window. */
+        start?: components["parameters"]["Start"];
+        /** @description End of a historical window (RFC3339, exclusive). The range is aligned outwards to the stored resolution. */
+        end?: components["parameters"]["End"];
       };
       header?: never;
       path: {
@@ -698,6 +818,8 @@ export interface operations {
       };
       400: components["responses"]["BadRequest"];
       404: components["responses"]["NotFound"];
+      501: components["responses"]["HistoryUnavailable"];
+      503: components["responses"]["HistoryError"];
     };
   };
   searchFlows: {
@@ -713,6 +835,12 @@ export interface operations {
         exporter?: string;
         internal_scope?: components["schemas"]["FlowScope"];
         limit?: number;
+        /** @description Opaque `next_cursor` of the previous page. */
+        cursor?: string;
+        /** @description Start of a historical window (RFC3339, inclusive). Requires `end`; omit both for the live window. */
+        start?: components["parameters"]["Start"];
+        /** @description End of a historical window (RFC3339, exclusive). The range is aligned outwards to the stored resolution. */
+        end?: components["parameters"]["End"];
       };
       header?: never;
       path?: never;
@@ -730,6 +858,35 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      501: components["responses"]["HistoryUnavailable"];
+      503: components["responses"]["HistoryError"];
+    };
+  };
+  getHistoryTimeline: {
+    parameters: {
+      query: {
+        start: components["schemas"]["Timestamp"];
+        end: components["schemas"]["Timestamp"];
+        max_points?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Timeline buckets. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HistoryTimelineResponse"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      501: components["responses"]["HistoryUnavailable"];
+      503: components["responses"]["HistoryError"];
     };
   };
   websocket: {

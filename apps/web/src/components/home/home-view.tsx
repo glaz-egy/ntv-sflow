@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useLiveQuery } from "@/lib/data/data-context";
 import { hrefFor, type HomeMode } from "@/lib/state/context";
+import { useHistoryWindow } from "@/lib/state/use-history-window";
 import { useInvestigation, useReducedMotionPreference } from "@/lib/state/use-investigation";
 import { useUiStore } from "@/lib/state/ui-store";
 import { COLORS } from "@/lib/viz/colors";
@@ -35,8 +36,11 @@ export function HomeView() {
   const particles = useUiStore((s) => s.particles);
   const motion = useUiStore((s) => s.motion);
   const reduced = useReducedMotionPreference(motion);
+  const { range } = useHistoryWindow();
 
   const query = {
+    start: range?.start,
+    end: range?.end,
     focus_node_id: ctx.src,
     destination_key: ctx.dst,
     vlan_id: ctx.vlan,
@@ -47,8 +51,10 @@ export function HomeView() {
     include_inactive: ctx.inactive,
     scope: ctx.scope,
   };
-  const { data: traffic } = useLiveQuery((p) => p.getHomeTraffic(query), [JSON.stringify(query)]);
-  const { data: topology } = useLiveQuery((p) => p.getTopology(), []);
+  const { data: traffic } = useLiveQuery((p) => p.getHomeTraffic(query), [JSON.stringify(query)], { live: !range });
+  const { data: topology } = useLiveQuery((p) => p.getTopology(range ?? undefined), [range?.start, range?.end], {
+    live: !range,
+  });
 
   const vlans = [...new Set((topology?.nodes ?? []).map((n) => n.vlan_id).filter((v): v is number => v !== null))].sort(
     (a, b) => a - b,

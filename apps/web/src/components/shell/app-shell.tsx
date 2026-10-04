@@ -13,12 +13,15 @@ import { useCurrentView, useInvestigation } from "@/lib/state/use-investigation"
 import { useUiStore, type MotionPreference } from "@/lib/state/ui-store";
 import { cn } from "@/lib/utils";
 import { OptionGroup, SelectField } from "@/components/common/fields";
+import { useHistoryWindow } from "@/lib/state/use-history-window";
+import { Timeline, useHistoryLabel } from "./timeline";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-dvh flex-col">
       <Header />
       {children}
+      <Timeline />
       <StatusBar />
     </div>
   );
@@ -76,7 +79,9 @@ const BADGE: Record<LiveState, { label: string; className: string; dot: string }
 function LiveBadge() {
   const { status } = useData();
   const state = useLiveState();
-  const b = BADGE[state];
+  const { range } = useHistoryWindow();
+  // A historical window is never shown as "Live".
+  const b = range ? { label: "History", className: "text-amber-300", dot: "bg-amber-400" } : BADGE[state];
   return (
     <div
       role="status"
@@ -170,28 +175,37 @@ function StatusBar() {
   const { status, receivedAt } = useData();
   const { paused, setPaused } = useUiStore();
   const state = useLiveState();
+  const historyLabel = useHistoryLabel();
   const fmt = (iso: string | null | undefined) =>
     iso ? new Date(iso).toLocaleTimeString(undefined, { hour12: false }) : "—";
 
   return (
     <footer className="flex h-9 shrink-0 items-center gap-4 border-t border-border/60 px-3 text-xs text-muted-foreground">
-      <Button
-        size="xs"
-        variant={paused ? "default" : "outline"}
-        onClick={() => setPaused(!paused)}
-        aria-pressed={paused}
-      >
-        {paused ? <Play /> : <Pause />}
-        {paused ? "Resume" : "Pause"}
-      </Button>
-      <span className="tabular">
-        Window {fmt(status?.last_aggregate_at && new Date(Date.parse(status.last_aggregate_at) - status.window_seconds * 1000).toISOString())}
-        –{fmt(status?.last_aggregate_at)} ({status?.window_seconds ?? "?"} s)
-      </span>
+      {historyLabel ? (
+        <span className="tabular font-medium text-amber-200">History window {historyLabel}</span>
+      ) : (
+        <>
+          <Button
+            size="xs"
+            variant={paused ? "default" : "outline"}
+            onClick={() => setPaused(!paused)}
+            aria-pressed={paused}
+          >
+            {paused ? <Play /> : <Pause />}
+            {paused ? "Resume" : "Pause"}
+          </Button>
+          <span className="tabular">
+            Window {fmt(status?.last_aggregate_at && new Date(Date.parse(status.last_aggregate_at) - status.window_seconds * 1000).toISOString())}
+            –{fmt(status?.last_aggregate_at)} ({status?.window_seconds ?? "?"} s)
+          </span>
+        </>
+      )}
       <span className="tabular max-sm:hidden">
         Collector: {status?.collector.status ?? "—"} · last data {fmt(status?.collector.last_datagram_at)}
       </span>
-      {state === "stale" && <span className="font-medium text-red-300">Data is stale — showing last received window</span>}
+      {state === "stale" && !historyLabel && (
+        <span className="font-medium text-red-300">Data is stale — showing last received window</span>
+      )}
       <div className="flex-1" />
       <span className="max-lg:hidden">≈ = sampled estimate · ctr = interface counter</span>
       {status?.mock && (

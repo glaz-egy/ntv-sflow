@@ -12,6 +12,8 @@
  *   mode  Home view mode             scope Home internal/external scope
  *   sel   Home inspector selection   vlan Home VLAN filter    types Home device types
  *   inactive  Home: also show devices without traffic in the window
+ *   at    end of a historical window (RFC3339, UTC); absent = live (D-059)
+ *   span  historical window length in seconds (with `at`)
  */
 import type {
   DestinationKey,
@@ -39,7 +41,15 @@ export interface InvestigationContext {
   vlan: number | null;
   types: DeviceType[];
   inactive: boolean;
+  /** End of the historical window (ISO, whole seconds); null = live. */
+  at: string | null;
+  /** Historical window length in seconds. */
+  span: number;
 }
+
+/** Bounds of a historical window (the API rejects longer ranges). */
+export const MAX_SPAN_SECONDS = 400 * 24 * 3600;
+export const DEFAULT_SPAN_SECONDS = 300;
 
 export const DEFAULT_CONTEXT: InvestigationContext = {
   src: null,
@@ -55,6 +65,8 @@ export const DEFAULT_CONTEXT: InvestigationContext = {
   vlan: null,
   types: [],
   inactive: false,
+  at: null,
+  span: DEFAULT_SPAN_SECONDS,
 };
 
 const GROUPINGS: Grouping[] = ["country", "city", "asn", "ip"];
@@ -85,6 +97,17 @@ function nonNegativeInt(value: string | null): number | null {
   if (value === null || !/^\d+$/.test(value)) return null;
   const n = Number(value);
   return Number.isSafeInteger(n) ? n : null;
+}
+
+/** Normalizes a timestamp to whole-second UTC ISO ("2026-10-05T12:00:00Z"). */
+export function isoSeconds(ms: number): string {
+  return new Date(Math.floor(ms / 1000) * 1000).toISOString().replace(".000Z", "Z");
+}
+
+function timestamp(value: string | null): string | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? isoSeconds(ms) : null;
 }
 
 function nonEmpty(value: string | null): string | null {
@@ -122,6 +145,8 @@ export function parseContext(params: ParamSource): InvestigationContext {
     vlan: nonNegativeInt(params.get("vlan")),
     types: [...new Set(types)],
     inactive: params.get("inactive") === "1",
+    at: timestamp(params.get("at")),
+    span: Math.min(nonNegativeInt(params.get("span")) || DEFAULT_SPAN_SECONDS, MAX_SPAN_SECONDS),
   };
 }
 
@@ -140,6 +165,8 @@ export function serializeContext(ctx: InvestigationContext): URLSearchParams {
   if (ctx.vlan !== null) p.set("vlan", String(ctx.vlan));
   if (ctx.types.length > 0) p.set("types", ctx.types.join(","));
   if (ctx.inactive) p.set("inactive", "1");
+  if (ctx.at) p.set("at", ctx.at);
+  if (ctx.at && ctx.span !== DEFAULT_SPAN_SECONDS) p.set("span", String(ctx.span));
   return p;
 }
 
@@ -172,4 +199,11 @@ export function globeToHome(ctx: InvestigationContext, destination?: Destination
 export function homeToGlobe(ctx: InvestigationContext, deviceId?: string): InvestigationContext {
   if (deviceId === undefined || deviceId === ctx.src) return { ...ctx };
   return { ...ctx, src: deviceId, dst: null };
+}
+
+/** The historical window [start, end) of a context, or null when live. */
+export function historicalRange(ctx: InvestigationContext): { start: string; end: string } | null {
+  if (!ctx.at) return null;
+  const end = Date.parse(ctx.at);
+  return { start: isoSeconds(end - ctx.span * 1000), end: ctx.at };
 }

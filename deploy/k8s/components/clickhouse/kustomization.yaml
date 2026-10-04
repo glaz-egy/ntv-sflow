@@ -1,0 +1,13 @@
+# Persistent history in ClickHouse (D-059). Create the Secret first
+# (docs/KUBERNETES.ja.md §7a); the password is never committed:
+#   kubectl -n ntv create secret generic ntv-clickhouse \
+#     --from-literal=password='<pw>' \
+#     --from-literal=dsn='http://ntv:<pw>@ntv-clickhouse:8123/ntv'
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - clickhouse.yaml
+
+patches:
+  - path: api-clickhouse.yaml

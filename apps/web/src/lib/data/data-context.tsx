@@ -140,14 +140,17 @@ export function useLiveState(): LiveState {
 /**
  * Re-runs `fetcher` whenever a new window is displayed or deps change.
  * Keeps the previous data while refreshing (no flicker between ticks).
+ * With `live: false` (a historical window) it runs only when deps change.
  */
 export function useLiveQuery<T>(
   fetcher: (provider: TrafficDataProvider) => Promise<T>,
   deps: ReadonlyArray<string | number | boolean | null | undefined>,
-): { data: T | undefined; loading: boolean } {
+  options: { live?: boolean } = {},
+): { data: T | undefined; loading: boolean; error: boolean } {
   const { provider, version } = useData();
-  const key = JSON.stringify([version, ...deps]);
-  const [result, setResult] = useState<{ key: string; data: T | undefined } | null>(null);
+  const live = options.live ?? true;
+  const key = JSON.stringify([live ? version : "history", ...deps]);
+  const [result, setResult] = useState<{ key: string; data: T | undefined; error?: boolean } | null>(null);
   const fetcherRef = useRef(fetcher);
 
   useLayoutEffect(() => {
@@ -161,7 +164,7 @@ export function useLiveQuery<T>(
         if (!cancelled) setResult({ key, data });
       },
       () => {
-        if (!cancelled) setResult((r) => ({ key, data: r?.data }));
+        if (!cancelled) setResult((r) => ({ key, data: r?.data, error: true }));
       },
     );
     return () => {
@@ -170,5 +173,5 @@ export function useLiveQuery<T>(
   }, [provider, key]);
 
   // Previous data is kept while a newer request is in flight (no flicker).
-  return { data: result?.data, loading: result?.key !== key };
+  return { data: result?.data, loading: result?.key !== key, error: result?.key === key && Boolean(result.error) };
 }

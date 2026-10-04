@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ntv-api
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          env:
+            - name: HISTORY_BACKEND
+              value: clickhouse
+            - name: CLICKHOUSE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: ntv-clickhouse
+                  key: dsn

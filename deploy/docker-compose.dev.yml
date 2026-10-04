@@ -9,8 +9,9 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_DATA_MODE: ${WEB_DATA_MODE:-mock}
-        # Reached by the *browser*, so it must be a host-visible URL.
-        NEXT_PUBLIC_API_BASE_URL: http://localhost:${API_PORT:-8080}
+        # Reached by the *browser*, so it must be a host-visible URL. Set
+        # PUBLIC_HOST when the UI is opened from another machine (rebuild web).
+        NEXT_PUBLIC_API_BASE_URL: http://${PUBLIC_HOST:-localhost}:${API_PORT:-8080}
         NEXT_PUBLIC_MOCK_SEED: ${MOCK_SEED:-42}
         NEXT_PUBLIC_MOCK_SCENARIO: ${MOCK_SCENARIO:-default}
         NEXT_PUBLIC_MOCK_SPEED: ${MOCK_SPEED:-1}
@@ -30,7 +31,12 @@ services:
       MOCK_SCENARIO: ${MOCK_SCENARIO:-default}
       MOCK_SEED: ${MOCK_SEED:-42}
       MOCK_SPEED: ${MOCK_SPEED:-1}
-      API_CORS_ALLOWED_ORIGINS: http://localhost:${WEB_PORT:-3000}
+      # History (D-059): memory (default, lost on restart) | clickhouse | none.
+      #   HISTORY_BACKEND=clickhouse docker compose ... up -d clickhouse api
+      HISTORY_BACKEND: ${HISTORY_BACKEND:-memory}
+      CLICKHOUSE_DSN: http://ntv:ntv@clickhouse:8123/ntv
+      # Browser origins (comma-separated) allowed for REST and WebSocket.
+      API_CORS_ALLOWED_ORIGINS: ${WEB_ORIGINS:-http://${PUBLIC_HOST:-localhost}:${WEB_PORT:-3000}}
     ports:
       - "${API_PORT:-8080}:8080"
     healthcheck:
@@ -46,7 +52,8 @@ services:
   #   INVENTORY_FILE=/etc/ntv/inventory.demo.yaml SFLOW_TARGET=api-live:6343 \
   #     docker compose -f deploy/docker-compose.dev.yml --profile live --profile demo up --build -d api-live sflow-gen
   # Your own inventory: put it in ./configs and set INVENTORY_FILE=/etc/ntv/custom/<file>.yaml
-  # GeoIP: put GeoLite2-City.mmdb / GeoLite2-ASN.mmdb in ./data (optional).
+  # GeoIP: put GeoLite2-City.mmdb / GeoLite2-ASN.mmdb in ./data (optional; other
+  # MaxMind-format files such as DB-IP Lite via GEOIP_CITY_FILE / GEOIP_ASN_FILE).
   api-live:
     build: *go-build
     image: ntv-go:dev
@@ -57,9 +64,15 @@ services:
       INVENTORY_FILE: ${INVENTORY_FILE:-}
       COLLECTOR_LISTEN: 0.0.0.0:6343
       COLLECTOR_ALLOWED_SOURCES: ${COLLECTOR_ALLOWED_SOURCES:-}
-      GEOIP_CITY_DB: /data/GeoLite2-City.mmdb
-      GEOIP_ASN_DB: /data/GeoLite2-ASN.mmdb
-      API_CORS_ALLOWED_ORIGINS: http://localhost:${WEB_PORT:-3000}
+      # History (D-059): memory (default) | clickhouse (start the clickhouse
+      # service too; kept across restarts) | none.
+      HISTORY_BACKEND: ${HISTORY_BACKEND:-memory}
+      CLICKHOUSE_DSN: http://ntv:ntv@clickhouse:8123/ntv
+      # File names in ./data (e.g. DB-IP Lite: dbip-city-lite.mmdb / dbip-asn-lite.mmdb).
+      GEOIP_CITY_DB: /data/${GEOIP_CITY_FILE:-GeoLite2-City.mmdb}
+      GEOIP_ASN_DB: /data/${GEOIP_ASN_FILE:-GeoLite2-ASN.mmdb}
+      # Browser origins (comma-separated) allowed for REST and WebSocket.
+      API_CORS_ALLOWED_ORIGINS: ${WEB_ORIGINS:-http://${PUBLIC_HOST:-localhost}:${WEB_PORT:-3000}}
     volumes:
       - ../configs:/etc/ntv/custom:ro
       - ../data:/data:ro
@@ -114,13 +127,28 @@ services:
     volumes:
       - ntv_postgres:/var/lib/postgresql/data
 
+  # History store (HISTORY_BACKEND=clickhouse). The API creates the schema
+  # and applies retention (history.* in the config) on start.
+  #   HISTORY_BACKEND=clickhouse docker compose -f deploy/docker-compose.dev.yml --profile live up --build -d clickhouse api-live
   clickhouse:
     image: clickhouse/clickhouse-server:latest
+    environment:
+      CLICKHOUSE_DB: ntv
+      CLICKHOUSE_USER: ntv
+      CLICKHOUSE_PASSWORD: ntv
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "0"
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
     ports:
-      - "8123:8123"
-      - "9000:9000"
+      - "127.0.0.1:8123:8123" # HTTP interface used by the API (localhost only)
     volumes:
       - ntv_clickhouse:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/ping"]
+      interval: 10s
+      timeout: 3s
+      start_period: 20s
+    restart: unless-stopped
 
   redis:
     image: redis:7

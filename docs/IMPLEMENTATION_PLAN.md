@@ -1,6 +1,6 @@
 # Implementation Plan
 
-Status as of 2026-10-04 (Milestones A–D complete: the MVP definition of done is met). Companion to `TASKS.md` (backlog) and `DECISIONS.md` (D-021+ were added while executing this plan).
+Status as of 2026-10-05 (Milestones A–E complete: the MVP definition of done is met; history is persisted and replayable). Companion to `TASKS.md` (backlog) and `DECISIONS.md` (D-021+ were added while executing this plan).
 
 ## 1. Design-document review
 
@@ -40,7 +40,7 @@ Status as of 2026-10-04 (Milestones A–D complete: the MVP definition of done i
 8. **Go backend skeleton (Milestone B)** — OpenAPI source of truth, Go port of the mock with exact parity, REST + WebSocket API, HTTP provider in the frontend, Docker images. ✅
 9. **sFlow v5 collector (Milestone C)** — decoder, normalization, UDP runtime with backpressure and metrics, generator for end-to-end tests. ✅
 10. **Live mode (Milestone D)** — collector output aggregated into windows and served by the unchanged projections; inventory, exporters, GeoIP. ✅
-11. **Next: Milestone E** — persistence and history (D-057).
+11. **Milestone E** — persistence and history (D-059): stored per-second observations rebuilt into historical windows, timeline and replay. ✅ PostgreSQL deferred (D-060).
 
 ## 3. Repository tree
 
@@ -96,7 +96,8 @@ Status as of 2026-10-04 (Milestones A–D complete: the MVP definition of done i
 │   ├── packet/                               ✅ Ethernet/VLAN/IPv4/IPv6/TCP/UDP header parsing (fuzzed)
 │   ├── collector/                            ✅ UDP runtime, normalization, metrics, sinks
 │   ├── sflowgen/                             ✅ mock → sFlow datagrams
-│   └── storage/                              ○ Milestone D: PostgreSQL / ClickHouse
+│   ├── history/                              ✅ stores (memory, ClickHouse), recorder, historical windows, timeline
+│   └── (storage/)                            ○ PostgreSQL when inventory gets a writer (D-060)
 ├── configs/config.example.yaml
 ├── deploy/docker-compose.dev.yml
 └── docs/
@@ -159,15 +160,22 @@ Not yet: collector output is not fed into the API. That is Milestone D.
 
 ### Milestone E — Persistence and history
 
-- [ ] Repository interfaces; PostgreSQL schema/migrations for inventory and settings
-- [ ] ClickHouse schema for 1 m / 1 h aggregates and optional raw samples; retention (`history.*`)
-- [ ] Historical snapshot queries (`start`/`end` on `/globe`, `/home/traffic`, `/flows` with cursor)
-- [ ] Timeline / replay UI
+- [x] `internal/history`: `Store` interface; `Memory` (default, bounded) and `ClickHouse` (HTTP interface, no driver dependency)
+- [x] ClickHouse schema: per-second rows, 1 m / 1 h rollups by materialized views, boundary counters; migrations; TTL from `history.*`
+- [x] Asynchronous, bounded recorder (drops are counted; failed writes retried from a bounded buffer); metrics
+- [x] Historical windows: `start`/`end` on every view endpoint plus `/flows` with `cursor`; tier choice and alignment; averaging trimmed to stored data
+- [x] `GET /history/timeline`: per-scope sampled estimates de-duplicated across observation points, plus boundary counters
+- [x] Proof: a historical window over a live window's seconds yields identical Globe/Home/Flows/Destination/Device responses, for all mock scenarios (memory and ClickHouse) and for sFlow → collector → live → history
+- [x] UI: timeline (download/upload, counter lines, gaps), click/drag/keyboard selection, step, replay 0.5–4×, `at`/`span` in the URL, "History" badge; the in-browser mock never answers history with live data
+- [x] Compose `clickhouse` service, Kubernetes `components/clickhouse`
+- [ ] PostgreSQL for inventory/settings — deferred (D-060)
 
 ## 5. Known gaps / follow-ups
 
 - Frontend component/e2e tests (Globe selection, Home selection, Globe↔Home in a real browser) are not yet automated; logic is covered by unit tests on the pure state transitions and the mock backend.
-- Live mode keeps only the current window in memory: no history until Milestone E.
+- History uses the current inventory for attribution (D-059): renamed/re-addressed devices appear with today's metadata.
+- Recording gaps inside a historical window count as no traffic (the timeline shows them).
+- Rollups keep ephemeral ports; revisit after measuring ingest volume.
 - Device discovery (DHCP/ARP/LLDP/WLC) is not automated; devices come from the inventory file.
 - WebSocket subscription filters are accepted but not used yet: the server sends only the global `window_update`, and clients re-query.
 - The mock's `update_interval_seconds` and `window_seconds` are fixed at 1 s and 5 s; `app.update_interval` controls only the server's clock tick.

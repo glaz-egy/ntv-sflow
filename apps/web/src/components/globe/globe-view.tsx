@@ -9,6 +9,7 @@ import { FilterSection, SummaryItem, Workspace } from "@/components/shell/worksp
 import { Button } from "@/components/ui/button";
 import { useLiveQuery } from "@/lib/data/data-context";
 import { withGrouping } from "@/lib/state/context";
+import { useHistoryWindow } from "@/lib/state/use-history-window";
 import { useInvestigation, useReducedMotionPreference } from "@/lib/state/use-investigation";
 import { useUiStore } from "@/lib/state/ui-store";
 import { COLORS } from "@/lib/viz/colors";
@@ -33,8 +34,11 @@ export function GlobeView() {
   const particles = useUiStore((s) => s.particles);
   const motion = useUiStore((s) => s.motion);
   const reduced = useReducedMotionPreference(motion);
+  const { range } = useHistoryWindow();
 
   const query = {
+    start: range?.start,
+    end: range?.end,
     grouping: ctx.grouping,
     source_node_id: ctx.src,
     direction: ctx.dir,
@@ -42,8 +46,10 @@ export function GlobeView() {
     min_bps: ctx.min,
     limit: ctx.top ?? 100,
   };
-  const { data, loading } = useLiveQuery((p) => p.getGlobe(query), [JSON.stringify(query)]);
-  const { data: topology } = useLiveQuery((p) => p.getTopology(), []);
+  const { data, loading } = useLiveQuery((p) => p.getGlobe(query), [JSON.stringify(query)], { live: !range });
+  const { data: topology } = useLiveQuery((p) => p.getTopology(range ?? undefined), [range?.start, range?.end], {
+    live: !range,
+  });
 
   const sourceOptions = (topology?.nodes ?? [])
     .filter((n) => n.kind === "device" && !["router", "switch", "wireless_ap", "firewall"].includes(n.device_type))

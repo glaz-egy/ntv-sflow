@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ntv-clickhouse
+  labels:
+    app.kubernetes.io/name: ntv-clickhouse
+    app.kubernetes.io/component: history
+spec:
+  serviceName: ntv-clickhouse
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ntv-clickhouse
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ntv-clickhouse
+        app.kubernetes.io/component: history
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 101 # "clickhouse" in the image
+      containers:
+        - name: clickhouse
+          image: clickhouse/clickhouse-server:26.9
+          env:
+            - name: CLICKHOUSE_DB
+              value: ntv
+            - name: CLICKHOUSE_USER
+              value: ntv
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ntv-clickhouse
+                  key: password
+            - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+              value: "0"
+          ports:
+            - name: http
+              containerPort: 8123
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              memory: 4Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # storageClassName: local-path
+        resources:
+          requests:
+            storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ntv-clickhouse
+  labels:
+    app.kubernetes.io/name: ntv-clickhouse
+spec:
+  selector:
+    app.kubernetes.io/name: ntv-clickhouse
+  ports:
+    - name: http
+      port: 8123
+      targetPort: http

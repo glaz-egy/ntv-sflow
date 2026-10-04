@@ -54,3 +54,12 @@ network:
 geoip:
   city_db_path: "/data/geoip/GeoLite2-City.mmdb"
   asn_db_path: "/data/geoip/GeoLite2-ASN.mmdb"
+
+# History for the timeline and historical windows (D-059). memory is lost
+# when the pod restarts; components/clickhouse switches to ClickHouse.
+history:
+  backend: memory
+  memory_retention: "1h"
+  raw_flow_retention: "7d"
+  aggregate_1m_retention: "90d"
+  aggregate_1h_retention: "365d"

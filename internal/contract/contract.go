@@ -105,6 +105,38 @@ type StatusResponse struct {
 	UpdateIntervalSeconds float64         `json:"update_interval_seconds"`
 	WindowSeconds         float64         `json:"window_seconds"`
 	Mock                  *MockInfo       `json:"mock"`
+	History               *HistoryStatus  `json:"history"`
+}
+
+// HistoryTier is one stored resolution (D-059).
+type HistoryTier struct {
+	StepSeconds      int   `json:"step_seconds"`
+	RetentionSeconds int64 `json:"retention_seconds"`
+}
+
+// HistoryStatus is null when history is disabled.
+type HistoryStatus struct {
+	Backend  string        `json:"backend"`
+	Earliest *Timestamp    `json:"earliest"`
+	Latest   *Timestamp    `json:"latest"`
+	Tiers    []HistoryTier `json:"tiers"`
+}
+
+// HistoryTimelinePoint: rates are null where the bucket has no data.
+type HistoryTimelinePoint struct {
+	Start       Timestamp    `json:"start"`
+	HasData     bool         `json:"has_data"`
+	Inbound     *Measurement `json:"inbound"`
+	Outbound    *Measurement `json:"outbound"`
+	Internal    *Measurement `json:"internal"`
+	WanDownload *Measurement `json:"wan_download"`
+	WanUpload   *Measurement `json:"wan_upload"`
+}
+
+type HistoryTimelineResponse struct {
+	Window      TimeWindow             `json:"window"`
+	StepSeconds int                    `json:"step_seconds"`
+	Points      []HistoryTimelinePoint `json:"points"`
 }
 
 // ----------------------------------------------------------------- globe
@@ -317,6 +349,10 @@ type FlowSearchResponse struct {
 	Window         TimeWindow   `json:"window"`
 	Flows          []FlowRecord `json:"flows"`
 	TruncatedCount int          `json:"truncated_count"`
+	// NextCursor continues the search after this page (null on the last page).
+	NextCursor *string `json:"next_cursor"`
+	// NextOffset is filled by the projection; the API encodes it as NextCursor.
+	NextOffset *int `json:"-"`
 }
 
 // -------------------------------------------------------------- realtime

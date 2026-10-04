@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_CONTEXT,
   globeToHome,
+  historicalRange,
   homeToGlobe,
   hrefFor,
   parseContext,
@@ -33,8 +34,27 @@ describe("parseContext / serializeContext", () => {
       vlan: 20,
       types: ["pc", "server"],
       inactive: true,
+      at: "2026-10-05T03:00:00Z",
+      span: 900,
     };
     expect(parseContext(serializeContext(ctx))).toEqual(ctx);
+  });
+
+  it("normalizes the historical time and bounds the span", () => {
+    expect(parse("at=2026-10-05T12:34:56.789%2B09:00").at).toBe("2026-10-05T03:34:56Z");
+    expect(parse("at=yesterday").at).toBeNull();
+    expect(parse("at=2026-10-05T00:00:00Z&span=0").span).toBe(300);
+    expect(parse("at=2026-10-05T00:00:00Z&span=999999999").span).toBe(400 * 24 * 3600);
+    // span is only meaningful (and serialized) with at
+    expect(serializeContext({ ...DEFAULT_CONTEXT, span: 60 }).toString()).toBe("");
+  });
+
+  it("derives the historical range [at − span, at)", () => {
+    expect(historicalRange(DEFAULT_CONTEXT)).toBeNull();
+    expect(historicalRange({ ...DEFAULT_CONTEXT, at: "2026-10-05T00:05:00Z", span: 300 })).toEqual({
+      start: "2026-10-05T00:00:00Z",
+      end: "2026-10-05T00:05:00Z",
+    });
   });
 
   it("falls back to defaults for invalid values instead of throwing", () => {
@@ -100,6 +120,14 @@ describe("cross-view transitions", () => {
   it("Home → Globe for the same source keeps the destination", () => {
     expect(homeToGlobe(globe, "dev_phone01").dst).toBe("asn:13335");
     expect(homeToGlobe(globe).dst).toBe("asn:13335");
+  });
+
+  it("view switches keep the historical window", () => {
+    const hist = { ...globe, at: "2026-10-05T00:05:00Z", span: 60 };
+    expect(globeToHome(hist)).toMatchObject({ at: hist.at, span: 60 });
+    expect(homeToGlobe(globeToHome(hist), "dev_pc01")).toMatchObject({ at: hist.at, span: 60 });
+    const href = hrefFor("home", globeToHome(hist));
+    expect(parseContext(new URLSearchParams(href.split("?")[1]))).toMatchObject({ at: hist.at, span: 60 });
   });
 
   it("round trip Globe → Home → Globe preserves context", () => {

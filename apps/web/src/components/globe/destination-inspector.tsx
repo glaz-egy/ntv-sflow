@@ -7,6 +7,7 @@ import type { GlobeResponse } from "@/contracts";
 import { Rate } from "@/components/common/rate";
 import { Button } from "@/components/ui/button";
 import { useLiveQuery } from "@/lib/data/data-context";
+import { useHistoryWindow } from "@/lib/state/use-history-window";
 import { globeToHome, hrefFor, type InvestigationContext } from "@/lib/state/context";
 import { COLORS } from "@/lib/viz/colors";
 
@@ -29,10 +30,12 @@ export function DestinationInspector({
   onSelect: (key: string | null) => void;
   sourceLabel: string | null;
 }) {
-  const query = { source_node_id: ctx.src, protocol: ctx.proto };
+  const { range } = useHistoryWindow();
+  const query = { source_node_id: ctx.src, protocol: ctx.proto, start: range?.start, end: range?.end };
   const { data: detail, loading } = useLiveQuery(
     (p) => (ctx.dst ? p.getDestination(ctx.dst, query) : Promise.resolve(null)),
     [ctx.dst, JSON.stringify(query)],
+    { live: !range },
   );
 
   if (!ctx.dst) {

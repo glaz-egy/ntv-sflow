@@ -1,4 +1,4 @@
-import type { DirectionFilter, Protocol, Schemas } from "./common";
+import type { DirectionFilter, Protocol, Schemas, TimeRangeQuery } from "./common";
 
 export type Grouping = Schemas["Grouping"];
 /** `<grouping>:<value>`; parse by the first colon only (IPv6 values contain colons). */
@@ -14,7 +14,7 @@ export type DestinationMember = Schemas["DestinationMember"];
 export type GlobeDestinationDetail = Schemas["GlobeDestinationDetail"];
 
 /** Query parameters of GET /globe. */
-export interface GlobeQuery {
+export interface GlobeQuery extends TimeRangeQuery {
   grouping: Grouping;
   source_node_id?: string | null;
   direction?: DirectionFilter;

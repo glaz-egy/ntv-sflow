@@ -315,7 +315,21 @@ or:
 - sites (future)
 - users/roles (future)
 
-## 9. ClickHouse conceptual tables
+## 9. ClickHouse tables
+
+Implemented in `internal/history/clickhouse.go` (D-059). Migrations run on API start, and TTLs follow `history.*`.
+
+| Table | Rows | Key / partition | TTL |
+|---|---|---|---|
+| `flow_seconds` | 1 per second × exporter × unidirectional flow key: ports, ifIndex (−1 = absent), internal flags, `sample_count`, `estimated_bytes`, `sampling_rate` | `ORDER BY (ts, exporter_id, src_ip, dst_ip, protocol, src_port, dst_port)`, daily partitions | `raw_flow_retention` (7 d) |
+| `flow_minutes` | AggregatingMergeTree rollup of `flow_seconds` (materialized view); `last_ts` = newest raw second | same key, monthly partitions | `aggregate_1m_retention` (90 d) |
+| `flow_hours` | rollup of `flow_minutes` | same key, yearly partitions | `aggregate_1h_retention` (365 d) |
+| `counter_rates` | boundary-interface counter rates (rx/tx bps, interval) | `ORDER BY (at, exporter_id, if_index)` | same as `flow_hours` |
+| `schema_migrations` | applied migration versions | | |
+
+Addresses are `IPv6` (IPv4 as `::ffff:a.b.c.d`, unmapped on read). Device ids, GeoIP and ASN are not stored: they are applied at query time with the current inventory (D-059). Rollups keep ephemeral ports. Revisit (e.g. keep only the service port in `flow_hours`) once ingest volume is measured.
+
+Original conceptual notes:
 
 ### flow_observations
 Partition/TTL strategy should be decided after measured ingest volume.

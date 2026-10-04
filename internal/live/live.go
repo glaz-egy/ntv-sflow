@@ -20,6 +20,7 @@ import (
 	"network-traffic-visualizer/internal/devices"
 	"network-traffic-visualizer/internal/enrichment"
 	"network-traffic-visualizer/internal/flow"
+	"network-traffic-visualizer/internal/history"
 	"network-traffic-visualizer/internal/inventory"
 	"network-traffic-visualizer/internal/projection"
 	"network-traffic-visualizer/internal/topology"
@@ -38,6 +39,8 @@ type Options struct {
 	// MaxKeysPerSecond bounds memory per second bucket (0 = 200k).
 	MaxKeysPerSecond int
 	Now              func() time.Time
+	// History receives each second once it can no longer change (optional).
+	History history.Sink
 }
 
 type bucket struct {
@@ -63,6 +66,7 @@ type Source struct {
 	wan           map[string]wanRate // boundary exporter id → latest WAN rate
 	lastDatagram  time.Time
 	tick          int
+	flushed       int // seconds ≤ flushed were handed to History
 	frame         *projection.Frame
 	dirty         bool
 	invDirty      bool
@@ -116,6 +120,7 @@ func New(opts Options) (*Source, error) {
 	}
 	s.ctx = aggregation.Context{Classifier: classifier, Registry: reg, Geo: opts.Geo, Exporters: s.exporters, Policy: opts.Inventory.Policy}
 	s.tick = s.tickAt(opts.Now())
+	s.flushed = s.tick - 1 - opts.WindowSeconds
 	return s, nil
 }
 
@@ -141,6 +146,12 @@ func (s *Source) exporterFor(agentID, agentAddress string) string {
 
 // Publish implements collector.Sink.
 func (s *Source) Publish(b collector.Batch) {
+	var counterRows []history.CounterRow
+	defer func() {
+		if len(counterRows) > 0 && s.opts.History != nil {
+			s.opts.History.RecordCounters(counterRows)
+		}
+	}()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if b.ReceivedAt.After(s.lastDatagram) {
@@ -193,6 +204,9 @@ func (s *Source) Publish(b collector.Batch) {
 		o.ExporterID = exp
 		if r, ok := s.tracker.Update(o); ok {
 			s.wan[exp] = wanRate{rate: r}
+			counterRows = append(counterRows, history.CounterRow{
+				At: r.At, ExporterID: exp, IfIndex: o.IfIndex, RxBps: r.RxBps, TxBps: r.TxBps, IntervalSeconds: r.IntervalSeconds,
+			})
 		}
 	}
 }
@@ -201,18 +215,48 @@ func (s *Source) Publish(b collector.Batch) {
 func (s *Source) Advance(now time.Time) bool {
 	t := s.tickAt(now)
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if t <= s.tick {
+		s.mu.Unlock()
 		return false
 	}
 	s.tick = t
 	s.dirty = true
+	rows := s.closeSecondsLocked(t - 1 - s.opts.WindowSeconds)
 	for sec := range s.buckets {
 		if sec < t-1-s.opts.WindowSeconds {
 			delete(s.buckets, sec)
 		}
 	}
+	s.mu.Unlock()
+	if len(rows) > 0 {
+		s.opts.History.RecordFlows(rows)
+	}
 	return true
+}
+
+// closeSecondsLocked returns history rows for seconds up to `through`, which
+// no longer accept samples (D-054). Rows use live window labels: second
+// index sec is the interval (sec−1, sec] (D-059). Caller holds s.mu.
+func (s *Source) closeSecondsLocked(through int) []history.FlowRow {
+	if s.opts.History == nil || through <= s.flushed {
+		return nil
+	}
+	var rows []history.FlowRow
+	for sec := s.flushed + 1; sec <= through; sec++ {
+		bk := s.buckets[sec]
+		if bk == nil {
+			continue
+		}
+		start := s.opts.Epoch.Add(time.Duration(sec-1) * time.Second)
+		for _, k := range bk.order {
+			o := *bk.obs[k]
+			srcIn, _ := s.ctx.Classifier.IsInternal(o.SrcIP)
+			dstIn, _ := s.ctx.Classifier.IsInternal(o.DstIP)
+			rows = append(rows, history.FlowRow{Start: start, Obs: o, SrcInternal: srcIn, DstInternal: dstIn})
+		}
+	}
+	s.flushed = through
+	return rows
 }
 
 // window merges completed seconds (end−W, end]. Caller holds s.mu.
@@ -267,16 +311,41 @@ func (s *Source) wanRates(now time.Time) *projection.WanRates {
 	return &total
 }
 
-// Snapshot implements httpapi.Source.
-func (s *Source) Snapshot() (*projection.Frame, *projection.Inventory) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// refreshInventoryLocked publishes newly discovered exporters. Handlers may
+// still be reading the previous inventory: copy, never mutate. Caller holds s.mu.
+func (s *Source) refreshInventoryLocked() {
 	if s.invDirty {
-		// Handlers may still be reading the previous inventory: copy, never mutate.
 		cp := *s.inv
 		cp.Exporters = append([]flow.Exporter(nil), s.exporters...)
 		s.inv, s.invDirty = &cp, false
 	}
+}
+
+// HistoryFrame implements history.FrameBuilder: stored observations are
+// attributed with the current inventory, exactly like a live window.
+func (s *Source) HistoryFrame(obs []flow.WindowObservation, start time.Time, seconds int, wan *projection.WanRates) (*projection.Frame, *projection.Inventory) {
+	s.mu.Lock()
+	s.refreshInventoryLocked()
+	ctx, inv := s.ctx, s.inv
+	s.mu.Unlock()
+	return &projection.Frame{
+		Flows: aggregation.Attribute(obs, ctx), Epoch: start,
+		Tick: seconds, WindowEndTick: seconds, WindowSeconds: seconds, WAN: wan,
+	}, inv
+}
+
+// ObservationDedup implements history.FrameBuilder.
+func (s *Source) ObservationDedup() history.Dedup {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return history.NewDedup(s.exporters, s.opts.Inventory.Policy)
+}
+
+// Snapshot implements httpapi.Source.
+func (s *Source) Snapshot() (*projection.Frame, *projection.Inventory) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refreshInventoryLocked()
 	if s.frame != nil && !s.dirty {
 		return s.frame, s.inv
 	}

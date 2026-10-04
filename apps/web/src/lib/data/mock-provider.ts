@@ -1,4 +1,4 @@
-import type { WindowUpdatePayload } from "@/contracts";
+import type { Grouping, TimeRangeQuery, WindowUpdatePayload } from "@/contracts";
 import { MockBackend } from "@/lib/mock-backend/server";
 import { START_TICK, type ScenarioName } from "@/lib/mock-backend/scenarios";
 import type { TrafficDataProvider } from "./provider";
@@ -7,6 +7,14 @@ export interface MockProviderConfig {
   seed: number;
   scenario: ScenarioName;
   speed: number;
+}
+
+const NO_HISTORY = "History needs the API backend (NEXT_PUBLIC_DATA_MODE=api); the in-browser mock keeps none.";
+
+/** Never answer a historical request with live data. */
+function liveOnly<T>(range: TimeRangeQuery | undefined, answer: () => T): Promise<T> {
+  if (range?.start || range?.end) return Promise.reject(new Error(NO_HISTORY));
+  return Promise.resolve(answer());
 }
 
 /**
@@ -50,19 +58,22 @@ export class MockDataProvider implements TrafficDataProvider {
     return Promise.resolve(this.backend.getStatus());
   }
   getGlobe(query: Parameters<MockBackend["getGlobe"]>[0]) {
-    return Promise.resolve(this.backend.getGlobe(query));
+    return liveOnly(query, () => this.backend.getGlobe(query));
   }
   getDestination(...args: Parameters<MockBackend["getDestination"]>) {
-    return Promise.resolve(this.backend.getDestination(...args));
+    return liveOnly(args[1], () => this.backend.getDestination(...args));
   }
   getHomeTraffic(query: Parameters<MockBackend["getHomeTraffic"]>[0]) {
-    return Promise.resolve(this.backend.getHomeTraffic(query));
+    return liveOnly(query, () => this.backend.getHomeTraffic(query));
   }
-  getTopology() {
-    return Promise.resolve(this.backend.getTopology());
+  getTopology(range?: TimeRangeQuery) {
+    return liveOnly(range, () => this.backend.getTopology());
   }
-  getDevice(...args: Parameters<MockBackend["getDevice"]>) {
-    return Promise.resolve(this.backend.getDevice(...args));
+  getDevice(id: string, grouping: Grouping, range?: TimeRangeQuery) {
+    return liveOnly(range, () => this.backend.getDevice(id, grouping));
+  }
+  getHistoryTimeline(): Promise<never> {
+    return Promise.reject(new Error(NO_HISTORY));
   }
 
   subscribe(listener: (u: WindowUpdatePayload) => void) {

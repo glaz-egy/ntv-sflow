@@ -14,6 +14,7 @@ Network Traffic Visualizer を Kubernetes クラスタで動かす手順です�
 | `deploy/k8s/overlays/live` | base + **ライブモード**（API に sFlow コレクターを内蔵）+ UDP/6343 の LoadBalancer | 実機の sFlow を可視化する本番構成 |
 | `deploy/k8s/overlays/demo` | live + `sflow-gen`（モック由来の sFlow をクラスタ内で送信） | 実機なしでライブモードの経路を確認する |
 | `deploy/k8s/components/geoip` | GeoIP データベース用 PVC のマウント（任意） | live に追加して国・都市・ASN を表示する |
+| `deploy/k8s/components/clickhouse` | ClickHouse（StatefulSet）に履歴を永続化（任意） | Pod を再起動しても履歴を残す。長期間（既定 365 日）のタイムライン |
 
 ```text
                 ┌──────────── Ingress (ntv.home.arpa) ────────────┐
@@ -30,7 +31,7 @@ sFlow 機器 ──UDP/6343─▶ Service ntv-sflow (LoadBalancer) ─▶ Pod nt
 | API は **1 レプリカ固定** | `replicas: 1`、`strategy: Recreate` | ライブ集計と WebSocket クライアントはプロセス内メモリに保持しているため（D-053）。複数にすると Pod ごとに異なるデータになります |
 | Web UI の接続先は**ビルド時に決まる** | `NEXT_PUBLIC_API_BASE_URL` はイメージに埋め込まれます | Next.js の `NEXT_PUBLIC_*` の仕様。ホスト名を変えたらイメージの再ビルドが必要です |
 | 認証なし | UI / API にログイン機能はまだありません（D-019） | 信頼できるネットワーク内だけで公開してください（`docs/SECURITY.md`） |
-| 履歴は保存しない | 直近の集計ウィンドウのみ表示 | PostgreSQL / ClickHouse は未実装（Milestone E）。このマニフェストには含めていません |
+| 履歴の既定はメモリ（1 時間） | API の Pod を再起動すると履歴が消えます | 永続化するには `components/clickhouse` を追加します（§7a）。PostgreSQL は使いません（D-060） |
 | sFlow の送信元 IP | `externalTrafficPolicy: Local` で保持 | `collector.allowed_sources` が UDP の送信元 IP で判定するため（D-049） |
 
 ### 0-3. 必要なもの
@@ -328,6 +329,45 @@ GeoIP がなくても動作します（宛先は「Unknown location」と表示�
 ログに `GeoIP database not found` が出なくなれば読み込まれています。定期更新が必要な場合は、MaxMind の `geoipupdate` を CronJob で動かして同じ PVC を更新する方法があります（このリポジトリには含めていません）。データベースを更新した後は、API を再起動してください（`kubectl -n ntv rollout restart deploy/ntv-api`）。
 
 ---
+
+## 7a. 履歴を ClickHouse に保存する（任意）
+
+既定では、履歴（画面下部のタイムライン、過去の時間帯の表示）は API の Pod のメモリに 1 時間分だけ保持され、Pod を再起動すると消えます。
+ClickHouse を使うと、保存期間は 1 秒単位 7 日、1 分単位 90 日、1 時間単位 365 日になります（`base/config.yaml` の `history.*` で変更できます）。
+
+1. パスワードを決めて Secret を作成します（パスワードはリポジトリに保存しません）。`dsn` にも同じパスワードを入れます。
+
+   ```bash
+   kubectl -n ntv create secret generic ntv-clickhouse --from-literal=password='<パスワード>' --from-literal=dsn='http://ntv:<パスワード>@ntv-clickhouse:8123/ntv'
+   ```
+
+   > パスワードに `@` `:` `/` などの記号を含める場合は、`dsn` の中では URL エンコードしてください（例：`@` → `%40`）。
+
+2. `deploy/k8s/overlays/live/kustomization.yaml` の `components:` で `../../components/clickhouse` を有効にして適用します。
+
+   ```bash
+   kubectl apply -k deploy/k8s/overlays/live
+   ```
+
+3. 確認します。
+
+   ```bash
+   kubectl -n ntv rollout status statefulset/ntv-clickhouse
+   ```
+
+   ```bash
+   kubectl -n ntv logs deploy/ntv-api | grep history
+   ```
+
+   `"msg":"history: clickhouse"` が出ていれば有効です。API は ClickHouse の準備ができるまで最大 1 分待ち、テーブルの作成と保存期間の設定を自動で行います。
+
+| 項目 | 既定値 | 変更方法 |
+|---|---|---|
+| ディスク | 20 GiB（`volumeClaimTemplates`） | `components/clickhouse/clickhouse.yaml` |
+| メモリ | 要求 1 GiB / 上限 4 GiB | 同上 |
+| イメージ | `clickhouse/clickhouse-server:26.9` | 同上 |
+
+> ClickHouse の Service（`ntv-clickhouse:8123`）はクラスタ内だけに公開されます。Ingress には含めていません。
 
 ## 8. TLS
 

@@ -143,12 +143,13 @@ Acceptance:
 
 ## Milestone 9 — Persistence
 
-- [ ] PostgreSQL schema/migrations
-- [ ] ClickHouse schema
-- [ ] repository interfaces
-- [ ] retention/TTL decision
-- [ ] historical flow query
-- [ ] aggregate query
+- [ ] PostgreSQL schema/migrations — deferred until something writes inventory/settings (D-060)
+- [x] ClickHouse schema (`flow_seconds` + 1 m / 1 h rollups, `counter_rates`)
+- [x] repository interfaces (`history.Store`: memory, ClickHouse)
+- [x] retention/TTL decision (D-059)
+- [x] historical flow query (`/flows?start&end&cursor`)
+- [x] aggregate query (historical windows on every view endpoint, `/history/timeline`)
+- [x] timeline / replay UI
 
 ## Milestone 10 — Production hardening
 

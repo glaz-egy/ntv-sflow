@@ -72,16 +72,26 @@ geoip:
   asn_db_path: "./data/GeoLite2-ASN.mmdb"
 
 postgres:
+  # Not used yet: inventory/settings stay in YAML until there is an editing
+  # UI or discovery (D-060).
   dsn: "postgres://ntv:ntv@localhost:5432/ntv?sslmode=disable"
 
 clickhouse:
-  dsn: "clickhouse://localhost:9000/ntv"
+  # HTTP interface (port 8123), used when history.backend = clickhouse.
+  # Put credentials in the CLICKHOUSE_DSN environment variable, not here:
+  #   CLICKHOUSE_DSN=http://user:password@clickhouse:8123/ntv
+  dsn: "http://localhost:8123/ntv"
 
 redis:
   enabled: false
   address: "localhost:6379"
 
+# History: per-second observations for the timeline and historical windows
+# (start/end on the API, D-059).
 history:
-  raw_flow_retention: "7d"
-  aggregate_1m_retention: "90d"
-  aggregate_1h_retention: "365d"
+  backend: memory # none | memory (lost on restart) | clickhouse
+  memory_retention: "1h"
+  # ClickHouse retention per resolution (TTL; applied on every start).
+  raw_flow_retention: "7d" # per-second rows
+  aggregate_1m_retention: "90d" # 1-minute rollups
+  aggregate_1h_retention: "365d" # 1-hour rollups and boundary counters

@@ -10,14 +10,16 @@ Kubernetes で動かす場合は `docs/KUBERNETES.ja.md` を参照してくだ�
 |---|---|
 | Web UI（Globe View / Home Network View） | ✅ 動作します |
 | モックデータ（決定的なトラフィックを生成） | ✅ 動作します |
-| Go API サーバー（`cmd/api`、REST + WebSocket） | ✅ 動作します（モックモードのみ） |
+| Go API サーバー（`cmd/api`、REST + WebSocket） | ✅ 動作します（モック / ライブ） |
 | sFlow コレクター（`cmd/collector`） | ✅ 動作します |
 | ライブモード（sFlow の実データを画面に表示） | ✅ 動作します |
-| PostgreSQL / ClickHouse（履歴の保存） | ⏳ 未実装（Milestone E） |
+| 履歴（タイムライン・過去の表示・再生） | ✅ 動作します（既定はメモリに 1 時間。ClickHouse を使うと永続化。E 章） |
+| PostgreSQL（インベントリ・設定の保存） | ⏳ 未使用（インベントリは YAML のまま。D-060） |
 
 画面右上の表示でデータの種類が分かります。`MOCK` はモックデータ、`SFLOW` は sFlow 機器からの実データです。
 モックデータで動かす場合、sFlow 対応機器・データベース・GeoIP ファイルはいずれも不要です。
-実データ（ライブモード）の手順は A-7 / B-6 を参照してください。現時点では直近 5 秒の集計のみを表示し、履歴は保存しません。
+実データ（ライブモード）の手順は A-6 / B-5 を参照してください。
+Go API を使う場合は、画面下部のタイムラインで過去の時間帯を表示・再生できます（E 章）。ブラウザ内モックでは履歴はありません。
 
 ### データの取得方法（2 種類）
 
@@ -470,12 +472,16 @@ docker compose -f deploy/docker-compose.dev.yml --profile demo down
 | `MOCK_SCENARIO` | `default` | モックのシナリオ（A-3 の表を参照） | `mock` 時は Web UI のビルド時、`api` 時は API の起動時 |
 | `MOCK_SEED` | `42` | 乱数シード | 同上 |
 | `MOCK_SPEED` | `1` | シミュレーション速度（倍率） | 同上 |
+| `PUBLIC_HOST` | `localhost` | ブラウザから見たサーバーのホスト名・IP。別の PC から開く場合は必須 | Web UI のビルド時（API の CORS 設定にも反映） |
+| `WEB_ORIGINS` | `http://<PUBLIC_HOST>:<WEB_PORT>` | API が受け付ける画面の URL（カンマ区切り。ホスト名と IP の両方で開く場合などに指定） | 起動時 |
 | `WEB_PORT` | `3000` | Web UI のホスト側ポート | 起動時（API の CORS 設定にも自動で反映） |
 | `API_PORT` | `8080` | API のホスト側ポート | 起動時（`api` モードでは Web UI の再ビルドも必要） |
 | `COLLECTOR_PORT` | `6343` | コレクターのホスト側 UDP ポート | 起動時 |
 | `COLLECTOR_METRICS_PORT` | `9102` | コレクターのメトリクスのホスト側ポート | 起動時 |
 | `COLLECTOR_ALLOWED_SOURCES` | （空） | 受け付ける sFlow 送信元（カンマ区切り） | 起動時 |
+| `HISTORY_BACKEND` | `memory` | 履歴の保存先：`memory`（API 再起動で消える）／`clickhouse`（`clickhouse` サービスも起動）／`none` | 起動時 |
 | `INVENTORY_FILE` | （空） | `api-live` のインベントリ（コンテナ内のパス） | 起動時 |
+| `GEOIP_CITY_FILE` / `GEOIP_ASN_FILE` | `GeoLite2-City.mmdb` / `GeoLite2-ASN.mmdb` | `./data` 内の GeoIP ファイル名（DB-IP Lite の場合は `dbip-city-lite.mmdb` / `dbip-asn-lite.mmdb`） | 起動時 |
 | `SFLOW_TARGET` | `collector:6343` | `sflow-gen` の送信先（ライブモードのデモでは `api-live:6343`） | 起動時 |
 
 例：API モード・`heavy-download` シナリオ・Web UI をポート 3100 で起動する場合
@@ -485,6 +491,13 @@ WEB_DATA_MODE=api MOCK_SCENARIO=heavy-download WEB_PORT=3100 docker compose -f d
 ```
 
 > API モードでは、シナリオの変更に Web UI の再ビルドは不要です（API を再起動するだけで反映されます）。
+
+**サーバーで起動し、別の PC のブラウザから開く場合**は `PUBLIC_HOST` を必ず指定してください。
+指定しないと、Web UI がブラウザ側の PC の `localhost:8080` に接続しようとして、データが表示されません。
+
+```bash
+WEB_DATA_MODE=api PUBLIC_HOST=server.example.lan docker compose -f deploy/docker-compose.dev.yml --profile live up --build -d web api-live
+```
 
 毎回指定する代わりに、値をファイルに書いておくこともできます。
 リポジトリ直下に `docker.env` などのファイルを作成します（`.gitignore` に登録済みです）。
@@ -535,12 +548,8 @@ docker run --rm -p 3000:3000 ntv-web:dev
 
 ### B-10. データベースコンテナについて（任意）
 
-`deploy/docker-compose.dev.yml` には PostgreSQL と ClickHouse も定義されています。
-永続化機能（Milestone D）の開発を始めるまでは、アプリからは使われません。単体で起動する場合は次のとおりです。
-
-```bash
-docker compose -f deploy/docker-compose.dev.yml up -d postgres clickhouse
-```
+`deploy/docker-compose.dev.yml` の `clickhouse` サービスは、履歴を永続化するときに使います（E 章）。
+PostgreSQL も定義されていますが、現在はアプリから使われません（D-060）。
 
 ---
 
@@ -605,13 +614,71 @@ API の仕様は `api/openapi.yaml` を参照してください。
 | ライブモードで右上が「Waiting for sFlow」のまま | まだ 1 つも sFlow を受信していません。機器の送信先、ファイアウォール、`/metrics` の `ntv_collector_datagrams_received_total` を確認してください。 |
 | 宛先がすべて「Unknown location」になる | GeoIP データベースがありません（起動ログに警告が出ます）。A-6 の手順 2 を参照してください。不明な位置を推測で埋めないのは仕様です。 |
 | 端末が IP アドレスの「Unresolved device」で表示される | インベントリに登録されていない端末です。`devices` にアドレスを追加してください。 |
+| インベントリを書き換えても反映されない | インベントリは API の起動時にだけ読み込まれます。`docker compose -f deploy/docker-compose.dev.yml --profile live restart api-live`（Docker 以外では API を再起動）で反映してください。書き間違いがあると API は起動に失敗するため、再起動後に `docker compose ... logs api-live` で `"msg":"live mode"` と `devices` の件数を確認します（例：`topology` に存在しないデバイス ID を書くと `endpoints must be device ids` で失敗します）。 |
 | Download / Upload に `ctr` ではなく `est` が付く | WAN インターフェースのカウンターが届いていません。インベントリの該当エクスポーターに `role: boundary` と正しい `boundary_if_index` を設定し、機器側でカウンターサンプリング（polling）を有効にしてください。 |
 | `ntv_collector_decoder_errors_total` が増える | sFlow v5 以外（v2/v4 や NetFlow など）が届いている可能性があります。機器の設定を確認してください。 |
 | 右上に `Stale` と表示される（モックモード） | `stale-collector` シナリオでは仕様どおりの表示です。それ以外では、ブラウザのタブがバックグラウンドで更新が止まっていた可能性があります。再読み込みしてください。 |
 
 ---
 
-## E. 今後（履歴）
+## E. 履歴（タイムライン・過去の表示・再生）
 
-現在のライブモードは直近の集計窓だけをメモリに保持します。PostgreSQL / ClickHouse への保存、過去の時点の表示、タイムライン再生は Milestone E で実装予定です。
-計画は `docs/IMPLEMENTATION_PLAN.md` を参照してください。
+Go API を使う構成（`NEXT_PUBLIC_DATA_MODE=api`）では、画面の下部にタイムラインが表示されます。
+API が受信した集計前のデータを 1 秒単位で保存し、指定した時間帯の Globe / Home / インスペクター / フロー検索を、ライブと同じ処理で組み立て直して表示します（D-059）。
+
+### E-1. 使い方
+
+| 操作 | 結果 |
+|---|---|
+| タイムラインをクリック | その時刻を中心に、選択中の長さ（既定 5 分）の時間帯を表示 |
+| タイムラインをドラッグ | ドラッグした範囲をそのまま表示 |
+| `‹` / `›`、またはタイムラインにフォーカスして ← / → | 1 区間ずつ前後に移動 |
+| `Replay` と速度（0.5×〜4×） | 時間帯を少しずつ進めて再生（1× = 1 秒に 1 秒） |
+| `Live` | ライブ表示に戻る |
+| 左の範囲（15 min〜7 d） | タイムラインに表示する期間 |
+| 右の長さ（1 min〜6 h） | 表示する時間帯の長さ |
+
+過去の時間帯を表示している間は、右上が `History`、下部が `History window …` と表示されます。
+URL に `?at=…&span=…` が付くので、そのまま共有・ブックマークでき、Globe と Home を切り替えても同じ時間帯が保たれます。
+
+値の意味：
+- 過去の値は、選んだ時間帯の**平均**です（≈ はサンプリングによる推定値）。WAN のカウンター（`CTR`）が時間帯の 8 割以上をカバーしていれば、Download / Upload はカウンターの値になります。
+- 記録が始まる前・最新データより後の部分は、平均の計算に含めません。途中で記録が止まっていた時間は「通信なし」として扱われます。タイムラインでは空白として表示されます。
+- 端末名などのインベントリ情報は**現在のもの**で表示されます。
+
+### E-2. 保存先
+
+| `HISTORY_BACKEND` | 保存期間 | 特徴 |
+|---|---|---|
+| `memory`（既定） | `history.memory_retention`（既定 1 時間） | 追加の準備は不要です。API を再起動すると消えます |
+| `clickhouse` | 1 秒単位 7 日、1 分単位 90 日、1 時間単位 365 日（`history.*` で変更可） | 再起動しても残ります。長い期間は自動的に粗い単位で表示されます |
+| `none` | — | 履歴は無効です（タイムラインは表示されません） |
+
+### E-3. ClickHouse を使う（Docker）
+
+```bash
+HISTORY_BACKEND=clickhouse docker compose -f deploy/docker-compose.dev.yml --profile live up --build -d clickhouse api-live web
+```
+
+モックモードの場合は、`api-live` を `api` に置き換えます。毎回指定する代わりに、`deploy/.env` に `HISTORY_BACKEND=clickhouse` と書いておくこともできます。
+API は起動時に ClickHouse の準備ができるまで待ち（最大 1 分）、テーブルの作成と保存期間の設定を自動で行います。
+
+### E-4. ClickHouse を使う（Docker なし）
+
+ClickHouse を別途用意し、HTTP インターフェース（ポート 8123）の URL を指定して API を起動します。
+
+```bash
+HISTORY_BACKEND=clickhouse CLICKHOUSE_DSN=http://user:password@localhost:8123/ntv pnpm dev:live
+```
+
+パスワードは設定ファイルに書かず、環境変数で渡してください。
+
+### E-5. 確認
+
+```bash
+curl -s http://localhost:8080/api/v1/status
+```
+
+`history` に `backend` と記録範囲（`earliest` / `latest`）が出ていれば有効です。`GET /metrics` の `ntv_history_rows_written_total` が増えていれば保存されています。`ntv_history_rows_dropped_total` が増える場合は、保存が追いついていません（ライブ表示には影響しません）。
+
+計画と制約は `docs/IMPLEMENTATION_PLAN.md`、設計は `docs/DECISIONS.md` の D-059 を参照してください。

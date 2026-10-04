@@ -10,6 +10,8 @@ import (
 	"network-traffic-visualizer/internal/counters"
 	"network-traffic-visualizer/internal/devices"
 	"network-traffic-visualizer/internal/enrichment"
+	"network-traffic-visualizer/internal/flow"
+	"network-traffic-visualizer/internal/history"
 	"network-traffic-visualizer/internal/projection"
 	"network-traffic-visualizer/internal/topology"
 )
@@ -23,6 +25,9 @@ type Options struct {
 	// Optional overrides from runtime configuration.
 	InternalCIDRs []string
 	Origin        *topology.Origin
+	// History receives each completed sim second (optional). The first
+	// Advance also records the seconds before StartTick.
+	History history.Sink
 }
 
 // Backend serves projections of the mock engine. Safe for concurrent use.
@@ -32,9 +37,11 @@ type Backend struct {
 	inv    *projection.Inventory
 	ctx    aggregation.Context
 
-	mu    sync.Mutex
-	tick  int
-	frame *projection.Frame
+	mu            sync.Mutex
+	tick          int
+	frame         *projection.Frame
+	flushed       int // sim seconds ≤ flushed were handed to History
+	lastCounterAt int // tick of the last recorded WAN counter poll
 }
 
 func NewBackend(opts Options) (*Backend, error) {
@@ -62,7 +69,7 @@ func NewBackend(opts Options) (*Backend, error) {
 		return nil, err
 	}
 	return &Backend{
-		opts: opts, engine: engine, inv: inv, tick: StartTick,
+		opts: opts, engine: engine, inv: inv, tick: StartTick, lastCounterAt: -1,
 		ctx: aggregation.Context{
 			Classifier: classifier, Registry: reg, Geo: sc.Geo,
 			Exporters: sc.Inventory.Exporters, Policy: sc.Inventory.Policy,
@@ -98,12 +105,82 @@ func (b *Backend) Advance(now time.Time) bool {
 	elapsed := now.Sub(b.opts.Epoch).Seconds() - StartTick
 	t := StartTick + int(math.Floor(elapsed*b.opts.Speed))
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if t <= b.tick {
+		b.mu.Unlock()
 		return false
 	}
 	b.tick = t
+	flows, counters := b.recordLocked()
+	b.mu.Unlock()
+	if b.opts.History != nil {
+		b.opts.History.RecordFlows(flows)
+		b.opts.History.RecordCounters(counters)
+	}
 	return true
+}
+
+// recordLocked returns history rows for completed sim seconds (mock windows
+// include the current tick) and a new WAN counter poll. Row starts use the
+// window labels: second t is the interval (t−1, t] (D-059). Caller holds b.mu.
+func (b *Backend) recordLocked() ([]history.FlowRow, []history.CounterRow) {
+	if b.opts.History == nil {
+		return nil, nil
+	}
+	var flows []history.FlowRow
+	through := b.engine.EffectiveTick(b.tick)
+	for t := b.flushed + 1; t <= through; t++ {
+		start := b.opts.Epoch.Add(time.Duration(t-1) * time.Second)
+		for _, o := range b.engine.SecondObservations(t) {
+			if o.SampleCount == 0 {
+				continue
+			}
+			srcIn, _ := b.ctx.Classifier.IsInternal(o.SrcIP)
+			dstIn, _ := b.ctx.Classifier.IsInternal(o.DstIP)
+			flows = append(flows, history.FlowRow{Start: start, Obs: o, SrcInternal: srcIn, DstInternal: dstIn})
+		}
+	}
+	if through > b.flushed {
+		b.flushed = through
+	}
+	var counters []history.CounterRow
+	if _, cur := b.engine.WanCounterReadings(b.tick); cur.At != b.lastCounterAt {
+		if w := b.wanRates(); w != nil {
+			ex := b.engine.BoundaryExporter()
+			counters = append(counters, history.CounterRow{
+				At: b.opts.Epoch.Add(time.Duration(cur.At) * time.Second), ExporterID: ex.ID, IfIndex: derefOr(ex.BoundaryIfIndex, 0),
+				RxBps: w.DownloadBps, TxBps: w.UploadBps, IntervalSeconds: float64(w.IntervalSeconds),
+			})
+		}
+		b.lastCounterAt = cur.At
+	}
+	return flows, counters
+}
+
+func derefOr(p *int, d int) int {
+	if p == nil {
+		return d
+	}
+	return *p
+}
+
+// HistoryFrame implements history.FrameBuilder.
+func (b *Backend) HistoryFrame(obs []flow.WindowObservation, start time.Time, seconds int, wan *projection.WanRates) (*projection.Frame, *projection.Inventory) {
+	return &projection.Frame{
+		Flows: aggregation.Attribute(obs, b.ctx), Epoch: start,
+		Tick: seconds, WindowEndTick: seconds, WindowSeconds: seconds, WAN: wan,
+	}, b.inv
+}
+
+// ObservationDedup implements history.FrameBuilder.
+func (b *Backend) ObservationDedup() history.Dedup {
+	return history.NewDedup(b.ctx.Exporters, b.ctx.Policy)
+}
+
+// Now is the sim clock (it runs faster than wall time when speed > 1).
+func (b *Backend) Now() time.Time {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.opts.Epoch.Add(time.Duration(b.tick) * time.Second)
 }
 
 // Snapshot returns the current frame and the inventory to project it with.

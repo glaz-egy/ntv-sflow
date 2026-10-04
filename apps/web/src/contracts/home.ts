@@ -1,4 +1,4 @@
-import type { Protocol, Schemas } from "./common";
+import type { Protocol, Schemas, TimeRangeQuery } from "./common";
 import type { DestinationKey } from "./globe";
 
 export type DeviceType = Schemas["DeviceType"];
@@ -23,7 +23,7 @@ export type DeviceDetail = Schemas["DeviceDetail"];
 export type DeviceListResponse = Schemas["DeviceListResponse"];
 
 /** Query parameters of GET /home/traffic. */
-export interface HomeTrafficQuery {
+export interface HomeTrafficQuery extends TimeRangeQuery {
   focus_node_id?: string | null;
   destination_key?: DestinationKey | null;
   vlan_id?: number | null;

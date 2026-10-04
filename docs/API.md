@@ -8,7 +8,7 @@ Base path:
 
 **The machine-readable contract is `api/openapi.yaml` (source of truth, D-021).** This document explains it. When the two disagree, the YAML wins.
 
-Implemented by `cmd/api` (Go). `status.mode` is `mock` (deterministic mock engine) or `live` (sFlow collector data, D-053). In live mode, `collector.status` is `disconnected` before the first datagram, `connected` while data arrives, and `stale` after `live.stale_after` without datagrams. `mock` is null. Prometheus metrics are served at `GET /metrics` in live mode. Run it with `pnpm dev:api`, or see `docs/SETUP.ja.md`.
+Implemented by `cmd/api` (Go). `status.mode` is `mock` (deterministic mock engine) or `live` (sFlow collector data, D-053). In live mode, `collector.status` is `disconnected` before the first datagram, `connected` while data arrives, and `stale` after `live.stale_after` without datagrams. `mock` is null. Prometheus metrics are served at `GET /metrics` in live mode and whenever history is enabled. Run it with `pnpm dev:api`, or see `docs/SETUP.ja.md`.
 
 ## 1. General response conventions
 
@@ -39,6 +39,11 @@ Node ids (D-027):
 
 TypeScript types are generated from `api/openapi.yaml` into `apps/web/src/contracts/generated/` (D-021).
 
+Historical windows (D-059):
+- `start` / `end` (RFC3339; `[start, end)`) on `/globe`, `/globe/destinations/{key}`, `/home/traffic`, `/home/topology`, `/devices`, `/devices/{id}` and `/flows` answer for that range from history. Omit both for the live window.
+- The range is aligned outwards to the stored resolution and trimmed to the stored data. The response `window` is the range actually used. Rates are averages over it (sampled estimates; WAN counters when they cover ≥ 80 %).
+- Errors: `400 INVALID_FILTER` (malformed, or only one of the two), `400 INVALID_RANGE` (end ≤ start, end in the future, longer than 400 d), `501 HISTORY_UNAVAILABLE` (`history.backend: none`), `503 HISTORY_ERROR` (store unreachable).
+
 ## 2. Status
 
 ### GET /status
@@ -57,7 +62,17 @@ Response:
   "server_time": "2026-10-03T14:45:32Z",
   "update_interval_seconds": 1,
   "window_seconds": 5,
-  "mock": { "seed": 42, "scenario": "default", "speed": 1 }
+  "mock": { "seed": 42, "scenario": "default", "speed": 1 },
+  "history": {
+    "backend": "clickhouse",
+    "earliest": "2026-09-28T00:00:00Z",
+    "latest": "2026-10-03T14:45:25Z",
+    "tiers": [
+      { "step_seconds": 1, "retention_seconds": 604800 },
+      { "step_seconds": 60, "retention_seconds": 7776000 },
+      { "step_seconds": 3600, "retention_seconds": 31536000 }
+    ]
+  }
 }
 ```
 
@@ -72,7 +87,7 @@ Query:
 - protocol
 - min_bps
 - limit
-- start/end for historical snapshot later
+- start/end: historical window (see §1)
 
 Response:
 
@@ -282,7 +297,33 @@ Filters:
 
 Also: `exporter`, `internal_scope=internal|external|transit`, `limit` (≤ 1000). Each result is a `FlowRecord`: endpoints, ports, scope, direction, resolved node ids, a sampled-estimate `bps`, and the exporter whose observation was used.
 
-This endpoint is for investigation, not the main visualization transport. Until persistence exists it searches the current window only (D-043).
+This endpoint is for investigation, not the main visualization transport. It searches the live window, or `[start, end)` from history. Results are ordered by estimated bytes. `truncated_count` counts the matches after this page, and `next_cursor` (opaque, null on the last page) is passed as `cursor` for the next one.
+
+## 10a. History timeline
+
+### GET /history/timeline
+
+Query: `start`, `end` (required; an `end` in the future is clamped to now), `max_points` (2–720, default 720).
+
+```json
+{
+  "window": { "start": "2026-10-03T13:45:00Z", "end": "2026-10-03T14:45:00Z" },
+  "step_seconds": 5,
+  "points": [
+    {
+      "start": "2026-10-03T13:45:00Z",
+      "has_data": true,
+      "inbound":  { "value": 2.1e8, "unit": "bps", "measurement_kind": "sampled_estimate", "window_seconds": 5, "sample_count": 795 },
+      "outbound": { "value": 2.9e7, "unit": "bps", "measurement_kind": "sampled_estimate", "window_seconds": 5, "sample_count": 238 },
+      "internal": { "value": 5.4e8, "unit": "bps", "measurement_kind": "sampled_estimate", "window_seconds": 5, "sample_count": 2051 },
+      "wan_download": { "value": 2.2e8, "unit": "bps", "measurement_kind": "counter", "interval_seconds": 5 },
+      "wan_upload": { "value": 3.1e7, "unit": "bps", "measurement_kind": "counter", "interval_seconds": 5 }
+    }
+  ]
+}
+```
+
+`inbound` is external → internal (download), and `outbound` is internal → external (upload). Each flow key is counted once per bucket, from the preferred observation point (D-024). `wan_*` are boundary counter rates and are null without counters. Buckets without stored data have `has_data: false` and null rates. A bucket at the edge of the stored data is averaged over its covered seconds (`window_seconds` says how many).
 
 ## 11. WebSocket
 

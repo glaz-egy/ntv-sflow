@@ -6,6 +6,7 @@ import type { HomeTrafficResponse, TrafficEdge } from "@/contracts";
 import { Rate } from "@/components/common/rate";
 import { Button } from "@/components/ui/button";
 import { useLiveQuery } from "@/lib/data/data-context";
+import { useHistoryWindow } from "@/lib/state/use-history-window";
 import { homeToGlobe, hrefFor, type InvestigationContext } from "@/lib/state/context";
 import { useInvestigation } from "@/lib/state/use-investigation";
 import { DEVICE_ICONS } from "./graph-elements";
@@ -100,9 +101,11 @@ function Overview({ traffic }: { traffic: HomeTrafficResponse | undefined }) {
 function NodeInspector({ id, traffic }: { id: string; traffic: HomeTrafficResponse | undefined }) {
   const [ctx, update] = useInvestigation();
   const isDevice = !id.startsWith("dst:") && id !== "internet";
+  const { range } = useHistoryWindow();
   const { data: detail, loading } = useLiveQuery(
-    (p) => (isDevice ? p.getDevice(id, ctx.grouping) : Promise.resolve(null)),
-    [id, ctx.grouping, isDevice],
+    (p) => (isDevice ? p.getDevice(id, ctx.grouping, range ?? undefined) : Promise.resolve(null)),
+    [id, ctx.grouping, isDevice, range?.start, range?.end],
+    { live: !range },
   );
 
   if (!isDevice) {

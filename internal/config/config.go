@@ -15,6 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"network-traffic-visualizer/internal/history"
 	"network-traffic-visualizer/internal/mock"
 )
 
@@ -117,7 +118,15 @@ type Redis struct {
 	Address string `yaml:"address"`
 }
 
+// History configures persistence (Milestone E, D-059).
 type History struct {
+	// Backend: none | memory (bounded, lost on restart) | clickhouse
+	// (clickhouse.dsn, an HTTP URL such as http://localhost:8123/ntv).
+	Backend string `yaml:"backend"`
+	// MemoryRetention bounds the memory backend (e.g. "1h").
+	MemoryRetention string `yaml:"memory_retention"`
+	// ClickHouse retention per resolution: per-second rows, 1-minute and
+	// 1-hour rollups ("7d", "90d", "365d"; Go durations also accepted).
 	RawFlowRetention     string `yaml:"raw_flow_retention"`
 	Aggregate1mRetention string `yaml:"aggregate_1m_retention"`
 	Aggregate1hRetention string `yaml:"aggregate_1h_retention"`
@@ -143,6 +152,8 @@ func Defaults() Config {
 	c.Visualization.Home.MaxNodes = 300
 	c.Visualization.Home.MaxEdges = 250
 	c.Visualization.Home.DefaultMode = "traffic"
+	c.History = History{Backend: "memory", MemoryRetention: "1h",
+		RawFlowRetention: "7d", Aggregate1mRetention: "90d", Aggregate1hRetention: "365d"}
 	return c
 }
 
@@ -190,6 +201,7 @@ func applyEnv(c *Config, getenv func(string) string) error {
 	str("MOCK_SCENARIO", &c.Mock.Scenario)
 	str("POSTGRES_DSN", &c.Postgres.DSN)
 	str("CLICKHOUSE_DSN", &c.ClickHouse.DSN)
+	str("HISTORY_BACKEND", &c.History.Backend)
 	str("REDIS_ADDRESS", &c.Redis.Address)
 	str("GEOIP_CITY_DB", &c.GeoIP.CityDBPath)
 	str("GEOIP_ASN_DB", &c.GeoIP.ASNDBPath)
@@ -311,6 +323,27 @@ func (c Config) Validate() error {
 	case "country", "city", "asn", "ip":
 	default:
 		add("visualization.globe.default_grouping: invalid %q", c.Visualization.Globe.DefaultGrouping)
+	}
+	switch c.History.Backend {
+	case "none":
+	case "memory":
+		if _, err := history.ParseRetention(c.History.MemoryRetention); err != nil {
+			add("history.memory_retention: %v", err)
+		}
+	case "clickhouse":
+		for name, v := range map[string]string{
+			"raw_flow_retention": c.History.RawFlowRetention, "aggregate_1m_retention": c.History.Aggregate1mRetention,
+			"aggregate_1h_retention": c.History.Aggregate1hRetention,
+		} {
+			if _, err := history.ParseRetention(v); err != nil {
+				add("history.%s: %v", name, err)
+			}
+		}
+		if !strings.HasPrefix(c.ClickHouse.DSN, "http://") && !strings.HasPrefix(c.ClickHouse.DSN, "https://") {
+			add("clickhouse.dsn: history.backend clickhouse needs an HTTP URL like http://localhost:8123/ntv, got %q", c.ClickHouse.DSN)
+		}
+	default:
+		add("history.backend: must be none, memory or clickhouse, got %q", c.History.Backend)
 	}
 	return errors.Join(errs...)
 }

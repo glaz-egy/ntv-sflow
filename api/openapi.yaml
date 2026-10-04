@@ -33,13 +33,17 @@ paths:
         - { name: protocol, in: query, schema: { $ref: "#/components/schemas/Protocol" } }
         - { name: min_bps, in: query, schema: { type: number, minimum: 0 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000 } }
+        - { $ref: "#/components/parameters/Start" }
+        - { $ref: "#/components/parameters/End" }
       responses:
         "200":
-          description: External destinations for the current window.
+          description: External destinations for the current (or requested historical) window.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/GlobeResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "501": { $ref: "#/components/responses/HistoryUnavailable" }
+        "503": { $ref: "#/components/responses/HistoryError" }
 
   /globe/destinations/{key}:
     get:
@@ -52,6 +56,8 @@ paths:
           schema: { type: string }
         - { name: source_node_id, in: query, schema: { type: string } }
         - { name: protocol, in: query, schema: { $ref: "#/components/schemas/Protocol" } }
+        - { $ref: "#/components/parameters/Start" }
+        - { $ref: "#/components/parameters/End" }
       responses:
         "200":
           description: Destination inspector data.
@@ -60,6 +66,8 @@ paths:
               schema: { $ref: "#/components/schemas/GlobeDestinationDetail" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/HistoryUnavailable" }
+        "503": { $ref: "#/components/responses/HistoryError" }
 
   /home/traffic:
     get:
@@ -77,23 +85,33 @@ paths:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 2000 } }
         - { name: include_inactive, in: query, schema: { type: boolean } }
         - { name: scope, in: query, schema: { $ref: "#/components/schemas/ScopeFilter" } }
+        - { $ref: "#/components/parameters/Start" }
+        - { $ref: "#/components/parameters/End" }
       responses:
         "200":
-          description: Device nodes and logical traffic edges for the current window.
+          description: Device nodes and logical traffic edges for the current (or requested historical) window.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/HomeTrafficResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "501": { $ref: "#/components/responses/HistoryUnavailable" }
+        "503": { $ref: "#/components/responses/HistoryError" }
 
   /home/topology:
     get:
       operationId: getHomeTopology
+      parameters:
+        - { $ref: "#/components/parameters/Start" }
+        - { $ref: "#/components/parameters/End" }
       responses:
         "200":
           description: Known topology with evidence per link.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TopologyResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "501": { $ref: "#/components/responses/HistoryUnavailable" }
+        "503": { $ref: "#/components/responses/HistoryError" }
 
   /devices:
     get:
@@ -103,6 +121,8 @@ paths:
         - { name: status, in: query, schema: { $ref: "#/components/schemas/DeviceStatus" } }
         - { name: vlan, in: query, schema: { type: integer, minimum: 0 } }
         - { name: search, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Start" }
+        - { $ref: "#/components/parameters/End" }
       responses:
         "200":
           description: Known devices.
@@ -110,6 +130,8 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DeviceListResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "501": { $ref: "#/components/responses/HistoryUnavailable" }
+        "503": { $ref: "#/components/responses/HistoryError" }
 
   /devices/{id}:
     get:
@@ -117,6 +139,8 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
         - { name: grouping, in: query, schema: { $ref: "#/components/schemas/Grouping" } }
+        - { $ref: "#/components/parameters/Start" }
+        - { $ref: "#/components/parameters/End" }
       responses:
         "200":
           description: Device inspector data.
@@ -125,13 +149,16 @@ paths:
               schema: { $ref: "#/components/schemas/DeviceDetail" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/HistoryUnavailable" }
+        "503": { $ref: "#/components/responses/HistoryError" }
 
   /flows:
     get:
       operationId: searchFlows
       description: |
-        Investigation endpoint (not the visualization transport). MVP searches
-        the current aggregate window only; history arrives with persistence.
+        Investigation endpoint (not the visualization transport). Searches
+        the current aggregate window, or [start, end) from history (D-059).
+        Results are ordered by estimated bytes; `next_cursor` continues.
       parameters:
         - { name: source, in: query, schema: { type: string } }
         - { name: destination, in: query, schema: { type: string } }
@@ -143,6 +170,9 @@ paths:
         - { name: exporter, in: query, schema: { type: string } }
         - { name: internal_scope, in: query, schema: { $ref: "#/components/schemas/FlowScope" } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000 } }
+        - { name: cursor, in: query, description: Opaque `next_cursor` of the previous page., schema: { type: string } }
+        - { $ref: "#/components/parameters/Start" }
+        - { $ref: "#/components/parameters/End" }
       responses:
         "200":
           description: Matching attributed flows.
@@ -150,6 +180,29 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/FlowSearchResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "501": { $ref: "#/components/responses/HistoryUnavailable" }
+        "503": { $ref: "#/components/responses/HistoryError" }
+
+  /history/timeline:
+    get:
+      operationId: getHistoryTimeline
+      description: |
+        Traffic over time for the timeline (D-059): sampled estimates per
+        scope, de-duplicated across observation points, plus boundary counter
+        rates where available. Buckets without stored data have has_data=false.
+      parameters:
+        - { name: start, in: query, required: true, schema: { $ref: "#/components/schemas/Timestamp" } }
+        - { name: end, in: query, required: true, schema: { $ref: "#/components/schemas/Timestamp" } }
+        - { name: max_points, in: query, schema: { type: integer, minimum: 2, maximum: 720 } }
+      responses:
+        "200":
+          description: Timeline buckets.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HistoryTimelineResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "501": { $ref: "#/components/responses/HistoryUnavailable" }
+        "503": { $ref: "#/components/responses/HistoryError" }
 
   /ws:
     get:
@@ -163,7 +216,29 @@ paths:
           description: Switching protocols.
 
 components:
+  parameters:
+    Start:
+      name: start
+      in: query
+      description: Start of a historical window (RFC3339, inclusive). Requires `end`; omit both for the live window.
+      schema: { $ref: "#/components/schemas/Timestamp" }
+    End:
+      name: end
+      in: query
+      description: End of a historical window (RFC3339, exclusive). The range is aligned outwards to the stored resolution.
+      schema: { $ref: "#/components/schemas/Timestamp" }
+
   responses:
+    HistoryUnavailable:
+      description: History is not enabled on this server.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+    HistoryError:
+      description: The history store could not be queried.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
     BadRequest:
       description: Invalid parameter.
       content:
@@ -259,7 +334,7 @@ components:
         speed: { type: number }
     StatusResponse:
       type: object
-      required: [mode, live, collector, last_aggregate_at, server_time, update_interval_seconds, window_seconds, mock]
+      required: [mode, live, collector, last_aggregate_at, server_time, update_interval_seconds, window_seconds, mock, history]
       properties:
         mode: { $ref: "#/components/schemas/DataMode" }
         live: { type: boolean, description: False when no new windows are being produced. }
@@ -276,6 +351,42 @@ components:
         mock:
           nullable: true
           allOf: [{ $ref: "#/components/schemas/MockInfo" }]
+        history:
+          nullable: true
+          description: Null when history is disabled (or with the in-browser mock).
+          allOf: [{ $ref: "#/components/schemas/HistoryStatus" }]
+    HistoryTier:
+      type: object
+      required: [step_seconds, retention_seconds]
+      properties:
+        step_seconds: { type: integer, description: Stored resolution. }
+        retention_seconds: { type: integer, description: How long this resolution is kept. }
+    HistoryStatus:
+      type: object
+      required: [backend, earliest, latest, tiers]
+      properties:
+        backend: { type: string, enum: [memory, clickhouse] }
+        earliest: { type: string, format: date-time, nullable: true }
+        latest: { type: string, format: date-time, nullable: true }
+        tiers: { type: array, items: { $ref: "#/components/schemas/HistoryTier" } }
+    HistoryTimelinePoint:
+      type: object
+      required: [start, has_data, inbound, outbound, internal, wan_download, wan_upload]
+      properties:
+        start: { $ref: "#/components/schemas/Timestamp" }
+        has_data: { type: boolean }
+        inbound: { nullable: true, allOf: [{ $ref: "#/components/schemas/Measurement" }], description: "External → internal (download), sampled estimate." }
+        outbound: { nullable: true, allOf: [{ $ref: "#/components/schemas/Measurement" }], description: "Internal → external (upload), sampled estimate." }
+        internal: { nullable: true, allOf: [{ $ref: "#/components/schemas/Measurement" }], description: "Internal ↔ internal, sampled estimate." }
+        wan_download: { nullable: true, allOf: [{ $ref: "#/components/schemas/Measurement" }], description: Boundary counter rate. }
+        wan_upload: { nullable: true, allOf: [{ $ref: "#/components/schemas/Measurement" }], description: Boundary counter rate. }
+    HistoryTimelineResponse:
+      type: object
+      required: [window, step_seconds, points]
+      properties:
+        window: { $ref: "#/components/schemas/TimeWindow" }
+        step_seconds: { type: integer }
+        points: { type: array, items: { $ref: "#/components/schemas/HistoryTimelinePoint" } }
 
     # -------------------------------------------------------------- globe
     Grouping:
@@ -555,11 +666,12 @@ components:
         last_seen: { type: string, format: date-time, nullable: true }
     FlowSearchResponse:
       type: object
-      required: [window, flows, truncated_count]
+      required: [window, flows, truncated_count, next_cursor]
       properties:
         window: { $ref: "#/components/schemas/TimeWindow" }
         flows: { type: array, items: { $ref: "#/components/schemas/FlowRecord" } }
-        truncated_count: { type: integer }
+        truncated_count: { type: integer, description: Matches after this page. }
+        next_cursor: { type: string, nullable: true, description: Pass as `cursor` for the next page; null on the last page. }
 
     # ----------------------------------------------------------- realtime
     SubscribeMessage:

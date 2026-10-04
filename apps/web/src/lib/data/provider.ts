@@ -11,8 +11,10 @@ import type {
   GlobeResponse,
   Grouping,
   HomeTrafficQuery,
+  HistoryTimelineResponse,
   HomeTrafficResponse,
   StatusResponse,
+  TimeRangeQuery,
   TopologyResponse,
   WindowUpdatePayload,
 } from "@/contracts";
@@ -29,8 +31,13 @@ export interface TrafficDataProvider {
     query: Omit<GlobeQuery, "grouping">,
   ): Promise<GlobeDestinationDetail | null>;
   getHomeTraffic(query: HomeTrafficQuery): Promise<HomeTrafficResponse>;
-  getTopology(): Promise<TopologyResponse>;
-  getDevice(id: string, grouping: Grouping): Promise<DeviceDetail | null>;
+  getTopology(range?: TimeRangeQuery): Promise<TopologyResponse>;
+  getDevice(id: string, grouping: Grouping, range?: TimeRangeQuery): Promise<DeviceDetail | null>;
+  /**
+   * Traffic over time (D-059). Only when `status.history` is non-null;
+   * other providers reject.
+   */
+  getHistoryTimeline(start: string, end: string, maxPoints: number): Promise<HistoryTimelineResponse>;
   /** Fires when a new aggregate window is available (WS `window_update`). */
   subscribe(listener: (update: WindowUpdatePayload) => void): () => void;
   dispose(): void;

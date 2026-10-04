@@ -94,3 +94,23 @@ func TestCollectorConfig(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestHistoryBackend(t *testing.T) {
+	c, err := Load("", env(map[string]string{"HISTORY_BACKEND": "clickhouse", "CLICKHOUSE_DSN": "http://ch:8123/ntv"}))
+	if err != nil || c.History.Backend != "clickhouse" || c.History.RawFlowRetention != "7d" {
+		t.Fatalf("%+v %v", c.History, err)
+	}
+	for _, bad := range []map[string]string{
+		{"HISTORY_BACKEND": "clickhouse", "CLICKHOUSE_DSN": "clickhouse://ch:9000/ntv"}, // native protocol is not supported
+		{"HISTORY_BACKEND": "postgres"},
+	} {
+		if _, err := Load("", env(bad)); err == nil || !strings.Contains(err.Error(), "history.backend") && !strings.Contains(err.Error(), "clickhouse.dsn") {
+			t.Errorf("%v: expected a history error, got %v", bad, err)
+		}
+	}
+	p := filepath.Join(t.TempDir(), "h.yaml")
+	os.WriteFile(p, []byte("history:\n  backend: memory\n  memory_retention: forever\n"), 0o600)
+	if _, err := Load(p, env(nil)); err == nil || !strings.Contains(err.Error(), "memory_retention") {
+		t.Errorf("bad retention must fail, got %v", err)
+	}
+}

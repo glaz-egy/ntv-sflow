@@ -110,6 +110,11 @@ Mock mode needs no collector, database or GeoIP file. Pick a scenario with
 `many-destinations`, `unknown-metadata`, `stale-collector`), or switch it in the
 Settings menu. `NEXT_PUBLIC_MOCK_SEED` and `NEXT_PUBLIC_MOCK_SPEED` are also read.
 
+History (D-059): with the Go API, the timeline at the bottom shows traffic over time and
+any past window can be opened or replayed (`?at=…&span=…` in the URL). It is kept in memory
+for 1 h by default; `HISTORY_BACKEND=clickhouse` persists it (7 d per second, 90 d per minute,
+365 d per hour). See `docs/SETUP.ja.md` §E.
+
 Views share their investigation context through the URL, e.g.
 `/home?dst=asn:13335` (sources of Cloudflare traffic) or
 `/globe?src=dev_pc01&proto=tcp` (pc-01's external TCP destinations).

@@ -24,6 +24,7 @@ import (
 	"network-traffic-visualizer/internal/collector"
 	"network-traffic-visualizer/internal/config"
 	"network-traffic-visualizer/internal/enrichment"
+	"network-traffic-visualizer/internal/history"
 	"network-traffic-visualizer/internal/httpapi"
 	"network-traffic-visualizer/internal/inventory"
 	"network-traffic-visualizer/internal/live"
@@ -35,6 +36,7 @@ import (
 // source is what main needs from either backend.
 type source interface {
 	httpapi.Source
+	history.FrameBuilder
 	Advance(now time.Time) bool
 }
 
@@ -55,33 +57,61 @@ func main() {
 	defer stop()
 	now := time.Now()
 
+	store, err := openHistory(ctx, cfg, log)
+	if err != nil {
+		fatal(log, "history", err)
+	}
+	var recorder *history.Recorder
+	var sink history.Sink
+	if store != nil {
+		defer store.Close()
+		recorder = history.NewRecorder(store, history.RecorderOptions{Logger: log.With("component", "history")})
+		sink = recorder
+	}
+
 	var src source
-	var metrics func(io.Writer)
+	var metrics []func(io.Writer)
+	clock := time.Now
 	switch cfg.App.Mode {
 	case "mock":
 		b, err := mock.NewBackend(mock.Options{
 			Seed: cfg.Mock.Seed, Scenario: cfg.Mock.Scenario, Speed: cfg.Mock.Speed,
-			Epoch: mock.EpochForStart(now), InternalCIDRs: cfg.Network.InternalCIDRs, Origin: &origin,
+			Epoch: mock.EpochForStart(now), InternalCIDRs: cfg.Network.InternalCIDRs, Origin: &origin, History: sink,
 		})
 		if err != nil {
 			fatal(log, "mock backend", err)
 		}
 		log.Info("mock mode", "scenario", cfg.Mock.Scenario, "seed", cfg.Mock.Seed, "description", b.Description())
-		src = b
+		src, clock = b, b.Now // the mock clock runs at mock.speed
 	case "live":
-		s, col, err := buildLive(ctx, cfg, origin, now, log)
+		s, col, err := buildLive(ctx, cfg, origin, now, log, sink)
 		if err != nil {
 			fatal(log, "live mode", err)
 		}
 		src = s
-		metrics = func(w io.Writer) {
-			col.Metrics().WritePrometheus(w)
-			s.WritePrometheus(w)
+		metrics = append(metrics, col.Metrics().WritePrometheus, s.WritePrometheus)
+	}
+
+	var hist *history.Service
+	recorderDone := make(chan struct{})
+	if store != nil {
+		hist = history.NewService(store, src, clock)
+		metrics = append(metrics, recorder.WritePrometheus)
+		go func() { recorder.Run(ctx); close(recorderDone) }()
+	} else {
+		close(recorderDone)
+	}
+	var writeMetrics func(io.Writer)
+	if len(metrics) > 0 {
+		writeMetrics = func(w io.Writer) {
+			for _, m := range metrics {
+				m(w)
+			}
 		}
 	}
 
 	hub := realtime.NewHub(100)
-	api := httpapi.New(src, hub, httpapi.Options{CORSAllowedOrigins: cfg.API.CORSAllowedOrigins, Logger: log, Metrics: metrics})
+	api := httpapi.New(src, hub, httpapi.Options{CORSAllowedOrigins: cfg.API.CORSAllowedOrigins, Logger: log, Metrics: writeMetrics, History: hist})
 	srv := &http.Server{Addr: cfg.API.Listen, Handler: api, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 120 * time.Second}
 
 	// One window_update per new aggregate window.
@@ -111,10 +141,47 @@ func main() {
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdown)
+	<-recorderDone // flush what is queued (bounded by the recorder)
 	log.Info("api stopped")
 }
 
-func buildLive(ctx context.Context, cfg config.Config, origin topology.Origin, now time.Time, log *slog.Logger) (*live.Source, *collector.Collector, error) {
+// openHistory returns nil when history.backend is none.
+func openHistory(ctx context.Context, cfg config.Config, log *slog.Logger) (history.Store, error) {
+	h := cfg.History
+	switch h.Backend {
+	case "memory":
+		ret, _ := history.ParseRetention(h.MemoryRetention) // validated by config
+		log.Info("history: memory (lost on restart)", "retention", ret.String())
+		return history.NewMemory(history.MemoryOptions{Retention: ret}), nil
+	case "clickhouse":
+		raw, _ := history.ParseRetention(h.RawFlowRetention)
+		minute, _ := history.ParseRetention(h.Aggregate1mRetention)
+		hour, _ := history.ParseRetention(h.Aggregate1hRetention)
+		// The database may still be starting (compose/k8s): retry briefly.
+		var lastErr error
+		for attempt := 0; attempt < 30; attempt++ {
+			c, err := history.OpenClickHouse(ctx, cfg.ClickHouse.DSN, history.ClickHouseOptions{
+				RawRetention: raw, MinuteRetention: minute, HourRetention: hour, Logger: log.With("component", "history"),
+			})
+			if err == nil {
+				log.Info("history: clickhouse", "raw_retention", h.RawFlowRetention, "1m_retention", h.Aggregate1mRetention, "1h_retention", h.Aggregate1hRetention)
+				return c, nil
+			}
+			lastErr = err
+			log.Warn("clickhouse not ready; retrying", "error", err.Error())
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(2 * time.Second):
+			}
+		}
+		return nil, lastErr
+	}
+	log.Info("history disabled")
+	return nil, nil
+}
+
+func buildLive(ctx context.Context, cfg config.Config, origin topology.Origin, now time.Time, log *slog.Logger, sink history.Sink) (*live.Source, *collector.Collector, error) {
 	inv := inventory.Empty()
 	if cfg.InventoryFile != "" {
 		var err error
@@ -151,6 +218,7 @@ func buildLive(ctx context.Context, cfg config.Config, origin topology.Origin, n
 		InternalCIDRs:  cfg.Network.InternalCIDRs,
 		Origin:         origin,
 		Geo:            geo,
+		History:        sink,
 	})
 	if err != nil {
 		return nil, nil, err

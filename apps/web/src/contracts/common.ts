@@ -13,6 +13,15 @@ export type AddressFamily = Schemas["AddressFamily"];
 export type MeasurementKind = Schemas["MeasurementKind"];
 export type Measurement = Schemas["Measurement"];
 export type TimeWindow = Schemas["TimeWindow"];
+
+/**
+ * Optional historical window (D-059): with both set, endpoints answer for
+ * [start, end) from history; omit both for the live window.
+ */
+export interface TimeRangeQuery {
+  start?: Timestamp | null;
+  end?: Timestamp | null;
+}
 export type Direction = Schemas["Direction"];
 export type DirectionFilter = Schemas["DirectionFilter"];
 export type Protocol = Schemas["Protocol"];

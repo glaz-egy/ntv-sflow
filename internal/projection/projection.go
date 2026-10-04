@@ -1046,6 +1046,8 @@ type FlowQuery struct {
 	Protocol, Exporter, Scope string
 	SrcPort, DstPort          *int
 	Limit                     int
+	// Offset skips the first matches (page cursor; ordering is by bytes, then key).
+	Offset int
 }
 
 func (inv *Inventory) Flows(f *Frame, q FlowQuery) c.FlowSearchResponse {
@@ -1083,8 +1085,10 @@ func (inv *Inventory) Flows(f *Frame, q FlowQuery) c.FlowSearchResponse {
 		return matched[i].Key < matched[j].Key
 	})
 	resp := c.FlowSearchResponse{Window: f.Window(), Flows: []c.FlowRecord{}}
+	matched = matched[min(q.Offset, len(matched)):]
 	if len(matched) > q.Limit {
 		resp.TruncatedCount = len(matched) - q.Limit
+		resp.NextOffset = c.Ptr(q.Offset + q.Limit)
 		matched = matched[:q.Limit]
 	}
 	for _, fl := range matched {

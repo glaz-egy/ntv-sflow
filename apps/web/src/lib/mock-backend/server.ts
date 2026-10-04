@@ -452,6 +452,8 @@ export class MockBackend {
       update_interval_seconds: 1,
       window_seconds: WINDOW_SECONDS,
       mock: { seed: this.options.seed, scenario: this.options.scenario, speed: this.options.speed },
+      // The in-browser mock keeps no history (D-059): the timeline needs the API.
+      history: null,
     };
   }
 

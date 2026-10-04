@@ -6,10 +6,12 @@ import type {
   GlobeQuery,
   GlobeResponse,
   Grouping,
+  HistoryTimelineResponse,
   HomeTrafficQuery,
   HomeTrafficResponse,
   ServerEnvelope,
   StatusResponse,
+  TimeRangeQuery,
   TopologyResponse,
   WindowUpdatePayload,
 } from "@/contracts";
@@ -113,6 +115,8 @@ export class HttpDataProvider implements TrafficDataProvider {
     return this.getOrNull<GlobeDestinationDetail>(`/globe/destinations/${encodeURIComponent(key)}`, {
       source_node_id: q.source_node_id,
       protocol: q.protocol,
+      start: q.start,
+      end: q.end,
     });
   }
 
@@ -120,12 +124,20 @@ export class HttpDataProvider implements TrafficDataProvider {
     return this.get<HomeTrafficResponse>("/home/traffic", { ...q });
   }
 
-  getTopology() {
-    return this.get<TopologyResponse>("/home/topology");
+  getTopology(range: TimeRangeQuery = {}) {
+    return this.get<TopologyResponse>("/home/topology", { start: range.start, end: range.end });
   }
 
-  getDevice(id: string, grouping: Grouping) {
-    return this.getOrNull<DeviceDetail>(`/devices/${encodeURIComponent(id)}`, { grouping });
+  getDevice(id: string, grouping: Grouping, range: TimeRangeQuery = {}) {
+    return this.getOrNull<DeviceDetail>(`/devices/${encodeURIComponent(id)}`, {
+      grouping,
+      start: range.start,
+      end: range.end,
+    });
+  }
+
+  getHistoryTimeline(start: string, end: string, maxPoints: number) {
+    return this.get<HistoryTimelineResponse>("/history/timeline", { start, end, max_points: maxPoints });
   }
 
   subscribe(listener: (u: WindowUpdatePayload) => void) {

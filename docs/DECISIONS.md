@@ -274,7 +274,7 @@ Status: Accepted
 The future live pipeline will implement the same `httpapi.Source` interface (`Snapshot()`, `Status()`) that the mock backend implements now.
 
 ## D-043 — `/flows` searches the current window only
-Status: Assumption (until persistence)
+Status: Superseded by D-059 (`start`/`end` and `cursor`)
 
 `GET /api/v1/flows` filters the current window's attributed flows. Time ranges and cursors arrive with ClickHouse (Milestone D).
 
@@ -363,3 +363,22 @@ Status: Accepted (MVP)
 - sFlow enters through a UDP LoadBalancer Service with `externalTrafficPolicy: Local`, which keeps the exporter source IP for `collector.allowed_sources`. Exporter identity still comes from the agent address (D-049).
 - GeoIP databases are optional and mounted from a PVC (`components/geoip`), because they exceed the ConfigMap size limit. PostgreSQL and ClickHouse are not deployed until persistence exists (D-057).
 - `/healthz` and `/metrics` are not routed through the Ingress. There is no authentication yet (D-019), so expose the Ingress on trusted networks only.
+
+## D-059 — History: stored observations, rebuilt windows
+Status: Accepted (Milestone E)
+
+What is stored is the pre-attribution input of a live window: one row per second, exporter and unidirectional flow key, with sample count, estimated bytes and sampling rate (`flow_seconds`). Boundary counter rates are stored too (`counter_rates`). Snapshots are not stored. A historical window `[start, end)` is rebuilt by merging the rows and running the unchanged `aggregation` → `projection` pipeline. So every endpoint (`/globe`, `/globe/destinations/{key}`, `/home/traffic`, `/home/topology`, `/devices`, `/devices/{id}`, `/flows`) answers for history exactly as for live. Tests prove that a historical window over the seconds of a live window gives byte-identical responses, for every mock scenario (memory and ClickHouse) and for sFlow through the collector.
+- **Attribution uses the current inventory.** Device names, exporter roles and GeoIP are applied at query time. A device renamed or re-addressed since then is shown with today's metadata. Identity snapshots can come later; until then this is documented, not hidden.
+- **Labels.** Rows use the live window labels: second index t is the interval (t−1, t], so its row starts at epoch + (t−1) s. Live and history windows over the same seconds therefore have the same `window`.
+- **Write path.** A second is handed to history once it can no longer change (it left every servable window, D-054). Writes are asynchronous and bounded: a full queue drops rows (counted in `ntv_history_rows_dropped_total`), and a failed write is retried from a bounded buffer. The collector never waits for storage (D-047).
+- **Stores.** `memory` is the default: one tier at 1 s, `history.memory_retention` (1 h), lost on restart. It serves mock mode and small setups. `clickhouse` keeps 1 s rows plus 1-minute and 1-hour rollups (materialized views), each with its own TTL (`history.raw_flow_retention` 7 d, `aggregate_1m_retention` 90 d, `aggregate_1h_retention` 365 d; counters follow the 1 h TTL). It uses the HTTP interface with server-side query parameters and needs no driver dependency. The schema is migrated and the TTLs applied on start. Rollups keep full flow keys, ephemeral ports included; at home-network scale that is affordable, and it should be revisited once ingest volume is measured (DATA_MODEL §9).
+- **Resolution.** A range uses the finest tier that still holds its start, as long as it has at most 21,600 buckets (1 s up to 6 h, 1 min up to 15 d, then 1 h). The range is aligned outwards to that step, and the response `window` shows the aligned range.
+- **Rates are averages.** A historical rate is bytes × 8 ÷ the window length, a sampled estimate over that window. The window is trimmed to the stored data (before the first and after the newest stored second), which is exact even for rollups because no rows exist outside it. A gap inside the window (collector or API down) counts as no traffic. The timeline shows such gaps explicitly (`has_data: false`), never interpolated.
+- **WAN summary.** It is the interval-weighted mean of the boundary counters when they cover ≥ 80 % of the window; otherwise the sampled sum (D-034).
+- **Timeline.** `GET /history/timeline` returns up to 720 buckets of download/upload/internal sampled estimates and the boundary counter rates. Each flow key counts once per bucket, from the preferred observation point (D-024, rule 7), also in ClickHouse (`argMin` by rank). Buckets at the edges of the stored data are averaged over their covered seconds. An `end` in the future is clamped to now; snapshots reject it.
+- **UI.** The URL carries `at` (window end) and `span` (seconds), so a historical view is shareable and survives Globe ↔ Home switches. While a historical window is selected, the badge says "History" and queries do not refresh every second. Replay moves the window 0.5–4 s per second. The in-browser mock keeps no history (`status.history: null`). It rejects historical requests rather than answering with live data, and the shell says so.
+
+## D-060 — PostgreSQL deferred
+Status: Accepted
+
+Inventory, exporters, topology and settings stay in the validated YAML inventory (D-055). Nothing edits them at runtime yet: there is no configuration UI and no discovery. A database copy would add a second source of truth without a user. PostgreSQL arrives with the first writer (configuration API, discovery or multi-user). `postgres.dsn` stays reserved.

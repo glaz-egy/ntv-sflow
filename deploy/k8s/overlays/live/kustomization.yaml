@@ -9,9 +9,12 @@ resources:
   - ../../base
   - sflow-service.yaml
 
-# Uncomment to mount MaxMind GeoLite2 databases from a PVC (docs/KUBERNETES.ja.md §7).
+# Optional components (docs/KUBERNETES.ja.md §7, §7a):
+#   geoip      — GeoIP databases from a PVC
+#   clickhouse — persistent history (create the ntv-clickhouse Secret first)
 # components:
 #   - ../../components/geoip
+#   - ../../components/clickhouse
 
 configMapGenerator:
   - name: ntv-inventory

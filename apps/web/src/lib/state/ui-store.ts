@@ -27,6 +27,13 @@ interface UiState {
   particles: boolean;
   motion: MotionPreference;
   mock: typeof INITIAL_MOCK_CONFIG;
+  /** Timeline: visible range (seconds) and replay (D-059). */
+  timelineRange: number;
+  replaying: boolean;
+  replaySpeed: number;
+  setTimelineRange: (seconds: number) => void;
+  setReplaying: (on: boolean) => void;
+  setReplaySpeed: (speed: number) => void;
   setLeftOpen: (open: boolean) => void;
   setRightOpen: (open: boolean) => void;
   setPaused: (paused: boolean) => void;
@@ -43,6 +50,12 @@ export const useUiStore = create<UiState>((set) => ({
   particles: true,
   motion: "system",
   mock: INITIAL_MOCK_CONFIG,
+  timelineRange: 3600,
+  replaying: false,
+  replaySpeed: 1,
+  setTimelineRange: (timelineRange) => set({ timelineRange }),
+  setReplaying: (replaying) => set({ replaying }),
+  setReplaySpeed: (replaySpeed) => set({ replaySpeed }),
   setLeftOpen: (leftOpen) => set({ leftOpen }),
   setRightOpen: (rightOpen) => set({ rightOpen }),
   setPaused: (paused) => set({ paused }),

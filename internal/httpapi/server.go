@@ -16,6 +16,7 @@ import (
 
 	"network-traffic-visualizer/internal/aggregation"
 	c "network-traffic-visualizer/internal/contract"
+	"network-traffic-visualizer/internal/history"
 	"network-traffic-visualizer/internal/projection"
 	"network-traffic-visualizer/internal/realtime"
 )
@@ -32,6 +33,9 @@ type Options struct {
 	Logger             *slog.Logger
 	// Metrics, when set, serves Prometheus text at GET /metrics.
 	Metrics func(io.Writer)
+	// History, when set, serves historical windows (start/end) and the
+	// timeline (D-059).
+	History *history.Service
 }
 
 type Server struct {
@@ -58,6 +62,7 @@ func New(src Source, hub *realtime.Hub, opts Options) *Server {
 	s.mux.HandleFunc("GET /api/v1/devices", s.devices)
 	s.mux.HandleFunc("GET /api/v1/devices/{id}", s.device)
 	s.mux.HandleFunc("GET /api/v1/flows", s.flows)
+	s.mux.HandleFunc("GET /api/v1/history/timeline", s.timeline)
 	s.mux.HandleFunc("GET /api/v1/ws", s.websocket)
 	if opts.Metrics != nil {
 		s.mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, _ *http.Request) {
@@ -102,8 +107,8 @@ func writeError(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, c.ApiError{Error: c.ApiErrorBody{Code: code, Message: msg}})
 }
 
-func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.src.Status())
+func (s *Server) status(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.statusResponse(r.Context()))
 }
 
 func (s *Server) globe(w http.ResponseWriter, r *http.Request) {
@@ -120,7 +125,10 @@ func (s *Server) globe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_FILTER", p.err.Error())
 		return
 	}
-	f, inv := s.src.Snapshot()
+	f, inv, ok := s.window(w, r, p)
+	if !ok {
+		return
+	}
 	writeJSON(w, http.StatusOK, inv.Globe(f, q))
 }
 
@@ -136,7 +144,10 @@ func (s *Server) destination(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_FILTER", p.err.Error())
 		return
 	}
-	f, inv := s.src.Snapshot()
+	f, inv, ok := s.window(w, r, p)
+	if !ok {
+		return
+	}
 	d := inv.Destination(f, key, src, proto)
 	if d == nil {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "no matching traffic for this destination in the current window")
@@ -167,12 +178,18 @@ func (s *Server) homeTraffic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_FILTER", p.err.Error())
 		return
 	}
-	f, inv := s.src.Snapshot()
+	f, inv, ok := s.window(w, r, p)
+	if !ok {
+		return
+	}
 	writeJSON(w, http.StatusOK, inv.Home(f, q))
 }
 
-func (s *Server) topology(w http.ResponseWriter, _ *http.Request) {
-	f, inv := s.src.Snapshot()
+func (s *Server) topology(w http.ResponseWriter, r *http.Request) {
+	f, inv, ok := s.window(w, r, &params{q: r.URL.Query()})
+	if !ok {
+		return
+	}
 	writeJSON(w, http.StatusOK, inv.Topology(f))
 }
 
@@ -188,7 +205,10 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_FILTER", p.err.Error())
 		return
 	}
-	f, inv := s.src.Snapshot()
+	f, inv, ok := s.window(w, r, p)
+	if !ok {
+		return
+	}
 	writeJSON(w, http.StatusOK, inv.Devices(f, q))
 }
 
@@ -202,7 +222,10 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_FILTER", p.err.Error())
 		return
 	}
-	f, inv := s.src.Snapshot()
+	f, inv, ok := s.window(w, r, p)
+	if !ok {
+		return
+	}
 	d := inv.Device(f, r.PathValue("id"), grouping)
 	if d == nil {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "unknown device")
@@ -219,19 +242,26 @@ func (s *Server) flows(w http.ResponseWriter, r *http.Request) {
 		Protocol: p.enum("protocol", false, protocols...), Exporter: p.str("exporter"),
 		Scope:   p.enum("internal_scope", false, "internal", "external", "transit"),
 		SrcPort: p.intPtr("src_port", 0, 65535), DstPort: p.intPtr("dst_port", 0, 65535),
-		Limit: p.int("limit", 1, 1000),
+		Limit: p.int("limit", 1, 1000), Offset: p.cursor("cursor"),
 	}
 	if p.err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_FILTER", p.err.Error())
 		return
 	}
-	f, inv := s.src.Snapshot()
-	writeJSON(w, http.StatusOK, inv.Flows(f, q))
+	f, inv, ok := s.window(w, r, p)
+	if !ok {
+		return
+	}
+	resp := inv.Flows(f, q)
+	if resp.NextOffset != nil {
+		resp.NextCursor = c.Ptr(encodeCursor(*resp.NextOffset))
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // WindowUpdate builds the envelope broadcast once per aggregate window.
 func (s *Server) WindowUpdate() c.ServerEnvelope {
-	st := s.src.Status()
+	st := s.statusResponse(context.Background())
 	end := st.ServerTime
 	if st.LastAggregateAt != nil {
 		end = *st.LastAggregateAt

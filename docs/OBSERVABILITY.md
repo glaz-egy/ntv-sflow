@@ -40,6 +40,11 @@ Labels should be bounded; avoid IP-heavy cardinality where unnecessary.
 
 ## 4. Database metrics
 
+History recorder (`/metrics` on the API, D-059):
+- `ntv_history_rows_written_total{kind="flow"|"counter"}`
+- `ntv_history_rows_dropped_total{reason="queue_full"|"retry_overflow"}`: rows not persisted. History has gaps, live is unaffected.
+- `ntv_history_write_errors_total`: failed writes (rows are retried from a bounded buffer).
+
 Monitor:
 - ClickHouse ingest
 - query latency
